@@ -71,7 +71,9 @@ def test_declarables_coinciden_con_el_borrador():
 
 def test_recalculo_por_tercero_expone_el_peso_de_superportuaria():
     """El ERP redondea por factura: 38.965.609 x 10 por mil = 389.656 vs 389.657."""
-    portuaria = _recon().por_tercero["800193573"]
+    # 3.4: la unidad es el grupo (NIT, tarifa). Superportuaria tiene una sola
+    # tarifa, asi que su grupo es uno solo.
+    portuaria = _recon().por_grupo[("800193573", Decimal("0.010"))]
     assert portuaria.retencion_recalculada == Decimal("389656")
     assert portuaria.retencion_contable == Decimal("389657")
     assert portuaria.diferencia == Decimal("-1")

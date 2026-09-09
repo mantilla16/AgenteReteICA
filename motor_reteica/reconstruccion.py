@@ -39,7 +39,16 @@ class LineaValorada:
 
 
 @dataclass(frozen=True)
-class TerceroReconstruido:
+class GrupoReconstruido:
+    """Unidad de cruce: un NIT a UNA tarifa.
+
+    3.4: antes la unidad era el tercero y se le aplicaba
+    `del_tercero[0].tarifa` a todas sus lineas. Un proveedor que factura
+    compras (10 por mil) y servicios (7 por mil) -- que es lo normal -- daba
+    una diferencia falsa. Julio 2026 no lo mostraba porque cada tercero tenia
+    una sola tarifa.
+    """
+
     nit: str
     tarifa: Decimal
     base: Decimal
@@ -47,8 +56,16 @@ class TerceroReconstruido:
     retencion_recalculada: Decimal
 
     @property
+    def clave(self) -> tuple:
+        return (self.nit, self.tarifa)
+
+    @property
     def diferencia(self) -> Decimal:
         return self.retencion_recalculada - self.retencion_contable
+
+
+# Nombre anterior, conservado para no romper importaciones existentes.
+TerceroReconstruido = GrupoReconstruido
 
 
 @dataclass(frozen=True)
@@ -70,17 +87,34 @@ class RenglonReconstruido:
 @dataclass(frozen=True)
 class Reconstruccion:
     lineas_valoradas: list
-    por_tercero: dict
+    por_grupo: dict
     por_actividad: dict
     total_base: Decimal
     total_impuesto_contable: Decimal
     total_impuesto_declarable: Decimal
     base_es_derivada: bool
 
+    @property
+    def por_tercero(self) -> dict:
+        """Alias historico. La unidad real es el grupo (NIT, tarifa); cuando
+        cada tercero tiene una sola tarifa -- el caso de julio 2026 -- ambos
+        coinciden en cantidad."""
+        return self.por_grupo
+
 
 def reconstruir(lineas, filas_erp, municipio, mapa_actividad) -> Reconstruccion:
     base_es_derivada = filas_erp is None
-    base_erp = {} if base_es_derivada else {f.nit: f.base for f in filas_erp}
+    # 3.3: el ERP se agrega por (NIT, tarifa), NO por NIT. Antes
+    # `{f.nit: f.base for f in filas_erp}` descartaba filas: dos filas del
+    # mismo NIT con codigos de retencion distintos dejaban solo la ultima.
+    base_erp = {}
+    if not base_es_derivada:
+        for fila in filas_erp:
+            tarifa = municipio.tarifa_por_codigo_ret.get(fila.codigo_ret)
+            if tarifa is None:
+                continue
+            clave = (fila.nit, tarifa)
+            base_erp[clave] = base_erp.get(clave, Decimal("0")) + fila.base
 
     valoradas = [
         LineaValorada(
@@ -92,27 +126,29 @@ def reconstruir(lineas, filas_erp, municipio, mapa_actividad) -> Reconstruccion:
         for linea in lineas
     ]
 
-    por_tercero = {}
-    for nit in sorted({v.linea.nit for v in valoradas}):
-        del_tercero = [v for v in valoradas if v.linea.nit == nit]
-        tarifa = del_tercero[0].tarifa
-        contable = sum((v.linea.retencion for v in del_tercero), Decimal("0"))
+    por_grupo = {}
+    for clave in sorted({(v.linea.nit, v.tarifa) for v in valoradas}):
+        nit, tarifa = clave
+        del_grupo = [v for v in valoradas
+                     if v.linea.nit == nit and v.tarifa == tarifa]
+        contable = sum((v.linea.retencion for v in del_grupo), Decimal("0"))
         base = base_erp.get(
-            nit, sum((v.base_derivada for v in del_tercero), Decimal("0")))
-        por_tercero[nit] = TerceroReconstruido(
+            clave, sum((v.base_derivada for v in del_grupo), Decimal("0")))
+        por_grupo[clave] = GrupoReconstruido(
             nit=nit, tarifa=tarifa, base=base,
             retencion_contable=contable,
             retencion_recalculada=_a_peso(base * tarifa),
         )
 
     acumulado = {}
-    for tercero in por_tercero.values():
-        codigo = mapa_actividad.get(tercero.nit, SIN_CLASIFICAR)
+    for grupo in por_grupo.values():
+        codigo = mapa_actividad.get(grupo.clave,
+                                    mapa_actividad.get(grupo.nit, SIN_CLASIFICAR))
         base, impuesto, _ = acumulado.get(
-            codigo, (Decimal("0"), Decimal("0"), tercero.tarifa))
-        acumulado[codigo] = (base + tercero.base,
-                             impuesto + tercero.retencion_contable,
-                             tercero.tarifa)
+            codigo, (Decimal("0"), Decimal("0"), grupo.tarifa))
+        acumulado[codigo] = (base + grupo.base,
+                             impuesto + grupo.retencion_contable,
+                             grupo.tarifa)
 
     por_actividad = {
         codigo: RenglonReconstruido(actividad=codigo, tarifa=tarifa,
@@ -122,7 +158,7 @@ def reconstruir(lineas, filas_erp, municipio, mapa_actividad) -> Reconstruccion:
 
     return Reconstruccion(
         lineas_valoradas=valoradas,
-        por_tercero=por_tercero,
+        por_grupo=por_grupo,
         por_actividad=por_actividad,
         total_base=sum((r.base_contable for r in por_actividad.values()), Decimal("0")),
         total_impuesto_contable=sum(

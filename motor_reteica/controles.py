@@ -67,7 +67,14 @@ def c3_auxiliar_vs_erp(lineas, filas_erp) -> ResultadoControl:
     auxiliar = defaultdict(lambda: _CERO)
     for linea in lineas:
         auxiliar[linea.nit] += linea.retencion
-    erp = {f.nit: f.retencion for f in filas_erp}
+
+    # 3.3: SUMAR las filas del ERP por NIT, no sobrescribirlas. Antes
+    # `{f.nit: f.retencion for f in filas_erp}` dejaba solo la ultima fila:
+    # un proveedor con dos codigos de retencion se comparaba incompleto y C3
+    # fallaba por un defecto del motor, no del cliente.
+    erp = defaultdict(lambda: _CERO)
+    for fila in filas_erp:
+        erp[fila.nit] += fila.retencion
 
     excepciones = []
     for nit in sorted(set(auxiliar) | set(erp)):
@@ -88,21 +95,31 @@ def c5_coherencia_cuenta_codigo(lineas, filas_erp, municipio) -> ResultadoContro
     if filas_erp is None:
         return _no_ejecutado("C5", nombre, "el reporte de retenciones del ERP")
 
-    codigo_por_nit = {f.nit: f.codigo_ret for f in filas_erp}
+    # 3.3: un NIT puede traer VARIOS codigos de retencion en el ERP (compras
+    # al 10 por mil y servicios al 7). Antes `{f.nit: f.codigo_ret}` dejaba uno
+    # solo y evaluaba todas las lineas del tercero contra el codigo de otra.
+    codigos_por_nit = defaultdict(set)
+    for fila in filas_erp:
+        codigos_por_nit[fila.nit].add(fila.codigo_ret)
+
     excepciones = []
     for linea in lineas:
         tarifa_cuenta = municipio.tarifa_por_cuenta.get(linea.cuenta)
-        codigo = codigo_por_nit.get(linea.nit)
-        if codigo is None:
+        codigos = codigos_por_nit.get(linea.nit)
+        if not codigos:
             continue
-        tarifa_codigo = municipio.tarifa_por_codigo_ret.get(codigo)
-        if tarifa_cuenta != tarifa_codigo:
+        tarifas_erp = {municipio.tarifa_por_codigo_ret.get(c) for c in codigos}
+        # Basta con que ALGUN codigo del tercero respalde la tarifa de la
+        # cuenta. Si ninguno lo hace, la linea no tiene respaldo en el ERP.
+        if tarifa_cuenta not in tarifas_erp:
             excepciones.append(Excepcion(
                 severidad=Severidad.HALLAZGO, control="C5",
-                descripcion="%s (NIT %s): cuenta %s implica %s pero el codigo %s "
-                            "del ERP implica %s"
+                descripcion="%s (NIT %s): cuenta %s implica %s pero el ERP solo "
+                            "trae para ese tercero los codigos %s, que implican %s"
                             % (linea.referencia, linea.nit, linea.cuenta,
-                               tarifa_cuenta, codigo, tarifa_codigo),
+                               tarifa_cuenta, ", ".join(sorted(codigos)),
+                               ", ".join(str(t) for t in sorted(
+                                   t for t in tarifas_erp if t is not None))),
                 renglon=linea.cuenta))
 
     return _resolver("C5", nombre, excepciones,
