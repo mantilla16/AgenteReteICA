@@ -1,0 +1,966 @@
+================================================================================
+MOTOR RETEICA - LISTA DE CAMBIOS PENDIENTES
+================================================================================
+Abierto:     2026-09-09
+Estado:      EN DISCUSION - nada implementado todavia
+Linea base:  151 pruebas verdes; anclas Terlica julio 2026 (spec seccion 10.1)
+             intactas. Cualquier cambio que las rompa se revierte.
+
+Corpus de prueba: C:\Users\Felipe Rios\Downloads\OneDrive_1_9-9-2026
+  OJO: auxiliar, borrador, ERP y las 3 facturas son BYTE-IDENTICOS a
+  tests/fixtures/terlica_202607 (mismo SHA-256). El motor nunca se ha
+  probado con datos que no haya visto. No hay mes de prueba ciega.
+
+================================================================================
+DECISIONES YA TOMADAS
+================================================================================
+
+D1. El manifiesto se queda. Declara identidad de archivos, NUNCA valores.
+    Regla dura: pipeline puede leer el manifiesto; parametros/ no lo importa
+    jamas. Si el manifiesto acepta cifras, el borrador vuelve a ser fuente de
+    parametros por la puerta de atras y se cae la seccion 3 del diseno.
+
+D2. Nada interactivo. El motor falla con mensaje util y escribe un manifiesto
+    plantilla con el rol faltante marcado; el auditor lo completa y reejecuta.
+    Motivo: correr desatendido, pruebas sin simular teclado, y que la eleccion
+    quede en disco y no en la cabeza de quien corrio el programa esa noche.
+    Un asistente interactivo puede venir DESPUES, encima, cuya unica funcion
+    sea escribir el manifiesto.
+
+D3. Sinonimos de columna GLOBALES pero llaveados por ERP, no por cliente.
+    "Saldo Haber per.inf." es de SAP, no de Terlica. Llave:
+    sap_ecc -> balance -> movimiento_periodo. Cada alias anota donde se
+    aprendio, para poder rastrear su procedencia.
+
+D4. La parametrizacion de columnas aplica solo a fuentes CONTABLES (auxiliar,
+    balance, reporte ERP). NO al borrador: ahi la posicion de los renglones ES
+    el objeto de prueba. Si el formulario cambia, eso es hallazgo, no
+    parametro. borrador_pdf.py sigue con patrones fijos.
+
+D5. Se senala la ETIQUETA de la columna, no la letra/indice. Lo mejor que
+    tiene el motor hoy es que los lectores buscan por etiqueta y sobreviven a
+    que SAP mueva una columna. Con indices fijos eso se pierde.
+
+================================================================================
+ETAPA 1 - CARGA Y PARAMETRIZACION (riesgo cero sobre las cifras)
+================================================================================
+
+1.1 [HECHO 2026-09-09]
+    HECHO: motor_reteica/manifiesto.py + pipeline.py usa el manifiesto si
+    la carpeta lo trae, y cae al modo legado (nombres literales) si no --
+    necesario porque tests/fixtures/** no se puede tocar. VERIFICADO
+    END-TO-END contra la carpeta real del cliente (Downloads/
+    OneDrive_1_9-9-2026) sin renombrar NINGUN archivo: anclas exactas
+    (ver "RESULTADO DE LA CORRIDA" mas abajo, corrida 2026-09-09 con
+    manifiesto). El rol 'facturas' admite subcarpeta o lista de archivos
+    sueltos (la carpeta real no trae subcarpeta facturas/).
+    Manifiesto de fuentes
+    Problema: pipeline.py:22 ARCHIVOS exige nombres literales
+    (borrador.pdf, auxiliar_2368.xlsx, balance.xlsx, sap_retenciones.xlsx) +
+    subcarpeta facturas/. La carpeta real del cliente NO ARRANCA:
+      FileNotFoundError: falta el borrador de la declaracion
+    Hubo que renombrar 4 archivos a mano para poder correr.
+    Cambio: manifiesto.json con rol -> nombre real, mas nit, periodo,
+    municipio, declarado_por, fecha. Insumo ausente se declara null
+    explicitamente (afirmacion "el cliente no lo entrego"), no por silencio.
+    Ganancia: el nombre original del cliente se conserva (dice cosas utiles,
+    ej. que el auxiliar es la version "DEF") y queda trazabilidad de la
+    fuente amarrada al hash que ya se calcula en ctx.huellas.
+
+1.2 [HECHO 2026-09-09]
+    HECHO: motor_reteica/parametros/columnas.py. ROLES_AUXILIAR/BALANCE/ERP
+    con sinonimos por rol; primer sinonimo = el conocido, los siguientes se
+    anotan en el docstring de cada Rol. auxiliar.py/balance.py/
+    sap_retenciones.py migrados a localizar_columnas(). Pruebas:
+    tests/test_parametros_columnas.py.
+    Diccionario de sinonimos de columnas por tipo de documento
+    Hoy son constantes enterradas, cada una con su trampa documentada solo en
+    un comentario que el usuario nunca lee:
+      balance.py:16       _MOVIMIENTO = "Saldo Haber per.inf."
+                          (NO "Saldo acumulado": incluye arrastre)
+      auxiliar.py         _CUENTA "Cuenta" + _IMPORTE "Importe en ML"
+                          (NIT en "Asignacion", nombre en "Tercero")
+      sap_retenciones.py  _BASE "Impte.base Qst en MI"
+                          (NO "Importe en MD": viene con IVA incluido)
+    Cambio: pasan a ser el PRIMER sinonimo de una lista por rol semantico.
+
+1.3 [HECHO 2026-09-09]
+    HECHO: ColumnaNoIdentificada en columnas.py, con .rol, .explicacion (en
+    terminos de auditoria, no de nombre de columna) y
+    .encabezados_disponibles. Reemplaza los ValueError genericos de los 3
+    lectores. Prueba: test_rol_sin_sinonimo_presente_lanza_columna_no_identificada.
+    Error tipado ColumnaNoIdentificada
+    Hoy: raise ValueError("no se encontro el encabezado del balance").
+    Un traceback; el auditor no sabe que falta ni que hacer.
+    Cambio: excepcion que lleve (rol faltante, encabezados disponibles,
+    explicacion del rol en terminos de AUDITORIA no de columna). Ej:
+    "el movimiento del periodo, no el saldo acumulado; el acumulado incluye
+    el arrastre de meses anteriores y haria fallar C2 todos los meses".
+
+1.4 [HECHO 2026-09-09] -- ver 1.1 para (b) escrito en el manifiesto
+    HECHO: (a) localizar_columnas resuelve TODOS los roles en una sola
+    pasada al cargar, antes de correr ningun control -- no hay ruta de
+    codigo que reintente con otra columna tras ver un control fallar.
+    (b) queda escrito en la hoja Parametros del papel (ya existia) y ahora
+    tambien en manifiesto.json (ver 1.1). (c) localizar_columnas exige
+    coincidencia EXACTA de etiqueta; probado con
+    test_ningun_sinonimo_de_un_rol_se_adivina_por_parecido.
+    Tres condiciones de la parametrizacion de columnas (no negociables)
+    a) Se declara AL CARGAR, antes de correr los controles. Nunca despues de
+       ver fallar C2. Si se invierte el orden, senalar deja de ser
+       identificacion y pasa a ser ajuste: el usuario elegiria la columna que
+       pone el control en verde. Es el mismo defecto circular del motor viejo,
+       mudado del borrador a las columnas.
+    b) Queda escrito: en el manifiesto y en la hoja Parametros del papel (ya
+       existe, 30 filas). Un socio debe poder cuestionar la eleccion.
+    c) Un rol sin mapear = NO EJECUTADO, igual que un archivo faltante.
+       Nunca se adivina la columna "mas parecida".
+    Dato que acota el riesgo: en el balance de Terlica, "Saldo Haber per.inf."
+    (36.318 + 438.243 = 474.561) es la UNICA de las 5 columnas numericas que
+    da el ancla. "Saldo acumulado" da 35.894.993 y C2 falla estrepitosamente.
+    Un error de senalamiento aqui grita, no se esconde. El riesgo real no es
+    el pase silencioso: es probar columnas hasta que se ponga verde.
+
+1.5 [HECHO 2026-09-09]
+    HECHO: identidad.verificar_tipo_documento(rol, ruta), llamado desde
+    pipeline.revisar() antes de leer cada fuente contable en serio.
+    Declarar el balance en el rol del auxiliar ahora es IdentidadIncompatible
+    (mensaje nombra el rol declarado y la estructura detectada), no un
+    traceback. Prueba:
+    test_archivo_del_tipo_equivocado_en_un_rol_se_detiene.
+    C0 verifica tipo de documento
+    Hoy C0 verifica entidad y periodo. Con manifiesto libre aparece un riesgo
+    nuevo: si el auditor declara el balance donde va el auxiliar, el motor SI
+    lo carga y revienta con traceback. Hoy el nombre literal protegia por
+    accidente.
+    Cambio: los lectores ya tienen la firma de cada tipo (los pares de
+    etiquetas de 1.2). Subir esa verificacion a C0 -> C0 pasa a verificar
+    entidad + periodo + NATURALEZA DEL DOCUMENTO, la tercera pata que le falta.
+
+1.6 [HECHO 2026-09-09] -- ya cubierto por las pruebas de 1.1-1.5, sin item propio
+    HECHO: los cuatro casos exigidos ya tienen prueba dedicada:
+      rol faltante en el manifiesto -> test_rol_pendiente_de_declarar_bloquea
+      archivo del tipo equivocado -> test_archivo_del_tipo_equivocado_en_un_rol_se_detiene
+        y test_declarar_el_balance_en_el_rol_del_auxiliar_se_detiene
+      alias aprendido que se reutiliza -> test_alias_aprendido_se_reutiliza
+      manifiesto con insumo en null -> test_rol_opcional_en_null_se_acepta_como_declaracion_explicita
+    Criterio de no-regresion: 184 verdes (linea base 151 + 33 nuevas de
+    etapa 1 y 2.0), anclas de julio 2026 intactas y verificadas ademas
+    contra la carpeta real del cliente sin renombrar (ver 1.1).
+    Pruebas nuevas de etapa 1
+    rol faltante en el manifiesto; archivo del tipo equivocado; alias
+    aprendido que se reutiliza; manifiesto con insumo en null.
+    Criterio de no-regresion: 151 verdes + anclas de julio intactas.
+
+================================================================================
+ETAPA 2 - C11 CON LA BASE DE LA FACTURA (mayor ganancia por esfuerzo)
+================================================================================
+
+2.0 [HECHO 2026-09-09] PARSER DE NUMEROS -- PRIMERO DE ESTA ETAPA (decidido por Felipe)
+    HECHO: leer_factura ahora mira la linea siguiente a la etiqueta cuando la
+    etiqueta no trae numeros consigo (encabezado tabular). Recupera la base
+    de FE338057 = 1.196.993. NO se cumple el criterio literal "3 facturas en
+    ALTA": el NIT del proveedor de FE338057 no esta en la capa de texto del
+    PDF (verificado con pdfplumber: solo 819002433 del cliente, y una imagen
+    de 570x86 en el encabezado que es donde debe estar el NIT del proveedor).
+    Sin OCR -no se construye en esta etapa, ver P2- esa factura se queda en
+    REQUIERE_REVISION con la base recuperada como unico dato adicional. Esto
+    contradice el criterio de aceptacion original de este item, que se
+    escribio antes de que P2 cerrara "no OCR"; prevalece P2 por ser la
+    decision cerrada. Pruebas: tests/test_ingesta_facturas.py (3 nuevas).
+    Aceptar formato ingles (1,196,993.00) ademas del colombiano en
+    facturas_pdf.py. NO es trabajo de IA.
+    Justificacion medida: FE338057 tiene 1213 chars de texto y su base
+    (1,196,993.00) SI esta ahi; el parser la perdio por el formato. Ver el
+    diagnostico completo en 5.2.
+    Efecto esperado: recupera FE338057 y sube C11 al 100% de la muestra de
+    julio sin llamar al modelo ni una vez.
+    La lectura de dos vias (5.1) sigue valiendo, pero para facturas
+    escaneadas de verdad -- no para este caso.
+    Criterio de aceptacion: las 3 facturas con confianza ALTA, y
+    base x tarifa == retencion en las tres (250530 -> 18.296,
+    FE10 -> 35.000, FE338057 -> 11.970 esperado; confirmar contra el
+    auxiliar al implementar).
+
+2.1 C11 parsea la base y NO la usa
+    Hoy C11 compara NIT, existencia y fecha. Nunca la base ni la retencion,
+    aunque facturas_pdf SI extrae la base. Informa "3 factura(s) cotejadas"
+    habiendo verificado dos campos: sobreafirmacion del alcance.
+    Verificado a mano contra los datos reales:
+      250530   base PDF 1.829.605 x 10 por mil = 18.296 vs 18.296 contable  dif 0
+      FE10     base PDF 5.000.000 x  7 por mil = 35.000 vs 35.000 contable  dif 0
+      FE338057 sin base parseada (REQUIERE_REVISION)
+    Es el UNICO control que va del documento fuente al registro contable sin
+    pasar por el ERP ni por el borrador. El mas fuerte disponible, sin
+    implementar.
+
+2.2 Techo real de C11: 1 de 3 facturas no se parsea
+    FE338057 (355 KB, la mas grande) sale REQUIERE_REVISION sin NIT ni base.
+    El motor lo declara honestamente como AVISO -- correcto -- pero el 33% de
+    la muestra documental queda a cotejo manual. Evaluar OCR o extraccion por
+    geometria.
+
+================================================================================
+ETAPA 3 - ARREGLOS ESTRUCTURALES (antes de meter otro mes u otro cliente)
+================================================================================
+Los tres son de la misma familia: la reconstruccion no es tan independiente
+como el spec afirma. Julio 2026 los cumple por casualidad (5 terceros, 5
+renglones, 1 tarifa por tercero). Este es el punto que de verdad amenaza una
+firma.
+
+3.1 El control circular volvio, disfrazado de mapa de actividades
+    pipeline.py:47 _mapa_actividad asigna NIT -> renglon emparejando la base
+    contra la base DECLARADA EN EL BORRADOR (abs(actividad.base - base) < 1000).
+    Luego C9 compara la reconstruccion contra ese mismo borrador. Si el cliente
+    clasifico un tercero en el renglon equivocado, el mapa lo sigue y C9 sale
+    OK. La clasificacion -- el juicio central del papel -- se toma del objeto
+    de prueba. Es el defecto #1 que el spec seccion 1.1 dice corregir.
+    DEMOSTRACION (2026-09-09, sobre los datos reales): se mutó el codigo de
+    actividad de CDEM en el borrador de 4669 a 9999 -- un CIIU que no existe.
+      borrador original (4669)          C9=OK   CDEM quedo en renglon 4669
+      borrador mutado (4669 -> 9999)    C9=OK   CDEM quedo en renglon 9999
+    El control terminal aprueba las dos. Es como calificar un examen con las
+    respuestas que el propio alumno anoto al margen.
+    Nota: el unico control que habria cazado el 9999 es C7 (actividad contra
+    el estatuto), y esta apagado. Con la atestacion de X1, C7 se prende y ese
+    caso queda cubierto.
+
+    PRECISION DEL HUECO (corrige una exageracion previa): si el cliente
+    clasifica mal Y aplica la tarifa equivocada, el impuesto declarado deja
+    de coincidir con la retencion del auxiliar y C9/C1 lo cazan por
+    aritmetica. Quedan invisibles solo dos casos:
+      (i)  mal clasificado DENTRO de la misma clase de tarifa
+           (4669 vs 5224, ambos 10 por mil). Impacto $0. Es el caso CDEM, y
+           ese si lo agarra C6 leyendo el concepto.
+      (ii) mal clasificado ENTRE clases de tarifa pero con la retencion
+           correcta. La aritmetica cuadra y hoy nada lo detecta.
+
+--------------------------------------------------------------------------------
+3.1.bis SOLUCION ADOPTADA -- TRES CAPAS (decidido 2026-09-09 con el auditor)
+--------------------------------------------------------------------------------
+Restricciones reales: pedir el maestro de proveedores NO es opcion, y pedir
+facturas es problematico. DECISION DEL AUDITOR: no espera verificar la
+integridad de la clasificacion; acepta que las lineas esten bien clasificadas
+en el borrador del cliente. Entonces la clasificacion no se reconstruye: se
+CUESTIONA.
+
+CAPA 1 - PISO DETERMINISTICO: coherencia cuenta contable <-> clase de tarifa
+  La cuenta codifica la tarifa (2368010010 = 10 por mil) y eso NO sale del
+  borrador, sale del auxiliar. La tarifa parte las actividades en clases:
+      7 por mil  -> 7490, 9609
+      10 por mil -> 4669, 5224, 9903
+  Se exige que el renglon asignado a un proveedor pertenezca a la clase de
+  tarifa de su cuenta.
+  PROBADO: se asigno a CDEM (cuenta 2368010010, 10 por mil) la actividad 9609
+  (7 por mil):
+      mapa correcto       -> sin contradiccion
+      mapa contradictorio -> FE338057: cuenta 2368010010 (0.010) vs
+                             actividad 9609 (0.007)
+                             FE338043: idem
+  Cierra el caso (ii), que es el que mueve pesos. Costo cero: la cuenta ya
+  esta en el auxiliar y la tabla de tarifas viene de la atestacion de X1.
+  LIMITE: dentro del 10 por mil hay tres actividades y no distingue entre
+  ellas. Reduce el universo de error, no lo elimina.
+
+CAPA 2 - IA-1 PLAUSIBILIDAD (idea de Felipe): la IA revisa si la descripcion
+  del auxiliar PUEDE o no caer en esa fila. No es control definitivo, pero es
+  mejor que nada, y cubre el caso (i).
+  Insumo disponible: el borrador YA trae la descripcion de cada renglon, no
+  solo el codigo:
+      4669 COMERCIO AL POR MAYOR DE OTROS   vs "REPARACION MANGUERA DE 6\""
+      5224 MANIPULACION DE CARGA            vs "SERVICIOS DE OPERACION PORTUARIA"
+  El segundo par es coherente; el primero no.
+
+  *** CONDICION DE REDACCION, LA MAS IMPORTANTE DE ESTE PUNTO ***
+  El control se llama PLAUSIBILIDAD, no clasificacion. Su estado OK
+  significa "la IA no encontro contradiccion", NUNCA "la clasificacion es
+  correcta". Si se redacta como lo segundo, el papel LAVA la circularidad:
+  queda un OK que parece verificacion independiente cuando el reparto se
+  sigue tomando del borrador. Eso es PEOR que no tenerlo, porque da
+  tranquilidad falsa.
+
+  Dos exigencias para que no sea ruido:
+    - Que CITE el texto en que se basa (concepto de la linea + descripcion
+      del renglon declarado).
+    - Que el motor calcule la consecuencia: si la actividad que la IA sugiere
+      esta en OTRA clase de tarifa -> impacto en pesos, sube a HALLAZGO; si
+      esta en la MISMA clase -> OBSERVACION con impacto $0.
+
+CAPA 3 - DECLARACION EN EL PAPEL
+  C9 baja de "OK" a "verificado en montos, NO en reparto por renglon". La
+  conclusion declara: "el reparto de proveedores por renglon se tomo del
+  borrador y no se verifico de forma independiente".
+  Precedente: el papel ya declara "no cubro integridad" (seccion 2.2 del
+  spec). Un socio puede vivir con una limitacion declarada; con un OK que no
+  es OK, no.
+
+TAREA ADICIONAL QUE SALE DE AQUI: hacer C6 SIMETRICO. Hoy solo dispara si un
+servicio esta en renglon de comercio, nunca al reves; una compra sentada en
+el renglon 5224 de puertos es invisible. Arreglarlo cubre parte del caso (i)
+sin pedirle nada al cliente ni llamar al modelo.
+
+3.2 El mapa se rompe si dos terceros caen en la misma actividad
+    Verificado: dos NITs de 1.000.000 y 2.000.000 contra un renglon 4669 de
+    3.000.000 devuelven mapa {} vacio. Como disponibles.remove() consume el
+    renglon, el segundo tercero queda sin codigo, cae en SIN_CLASIFICAR y C9
+    emite un HALLAZGO FALSO ("se reconstruyo pero no aparece en el borrador").
+    El primer mes con dos proveedores de comercio al por mayor, el motor
+    entrega un hallazgo inventado.
+
+3.3 El diccionario del ERP colapsa NITs repetidos
+    {f.nit: f.retencion for f in filas_erp} en C3, y lo mismo con codigo_ret
+    en C5. Verificado: dos filas del mismo NIT (una al 10 por mil, otra al 7)
+    dejan solo la ultima. C3 compara el auxiliar completo del tercero contra
+    una sola fila del ERP y falla; C5 evalua todas las lineas contra un codigo
+    que no les corresponde.
+    Arreglo: agregar el ERP por (nit, codigo_ret), no por nit.
+
+3.4 Tarifa unica por tercero
+    reconstruccion.py: tarifa = del_tercero[0].tarifa para todo el tercero.
+    Un proveedor con compras (10 por mil) y servicios (7 por mil) da una
+    diferencia falsa de -7.000 en C4 (verificado).
+    Arreglo: llevar la tarifa a nivel de LINEA, no de tercero.
+
+3.5 Fixtures de mutacion ESTRUCTURAL
+    La prueba de mutacion del spec seccion 10.2 valida contra datos alterados
+    en VALOR, no en ESTRUCTURA. Faltan: dos terceros por renglon; un tercero
+    con dos tarifas; un mes con 40 lineas en vez de 12.
+
+================================================================================
+ETAPA 4 - C12 CONTINUIDAD
+================================================================================
+
+4.1 C12 tiene sus insumos en la carpeta y no los mira
+    pipeline.py:118 lo tiene cableado como c12_continuidad(None, None):
+    siempre NO EJECUTADO. No es un control, es una nota fija. Y C13 siempre
+    emite el aviso de insumo faltante en consecuencia.
+    Los insumos SI estan en el corpus real:
+      FORMATO RETEICA - TERLICA JULIO 2026.xlsx -> 19 hojas mensuales
+        2025-01 a 2026-07: es el arrastre historico que C12 necesita.
+        TRAMPA: nombres de hoja sucios ("2026- 3", "2026 - 4", "2026 - 05").
+        No basta con f"{anio}-{mes:02d}"; hay que normalizar.
+      S_ALR_87012277_...pdf -> extracto de la cuenta 2368, sociedad DA09,
+        rango 2368000000-2368999999, periodos 07-07 2026.
+    Dato: la hoja "Pago" del PT manual del auditor esta VACIA (1x1). El
+    auditor tampoco tuvo el pago. Es el vacio que el spec le reprocha al papel
+    de julio y sigue abierto.
+
+================================================================================
+NO ES CODIGO - EL VERDADERO TECHO DEL PRODUCTO
+================================================================================
+
+X1. TARIFAS: ATESTACION DEL AUDITOR (decidido por Felipe 2026-09-09)
+    Situacion: santa_marta.py:44 dice "PROVISIONAL: tomadas del borrador del
+    cliente" y C7 sale NO EJECUTADO. La aserion de exactitud no esta probada
+    contra fuente externa.
+    DECISION: no se cargara el Acuerdo de cada municipio uno por uno -- no
+    escala. La tarifa se sigue tomando del borrador, PERO el auditor entra
+    como TESTIGO: el programa expone una casilla donde declara municipio y
+    tarifa. Si le queda duda, el auditor lo verifica por su cuenta.
+    Es un procedimiento de auditoria legitimo (es lo que hace el papel manual
+    cuando escribe "verificado contra el Acuerdo X"), a condicion de que se
+    implemente asi:
+
+    a) ESTADO PROPIO, NO "OK". C7 gana un cuarto estado: ATESTADO. No es OK
+       (nadie recalculo contra el estatuto) ni NO EJECUTADO (si hubo
+       procedimiento). El papel debe decir cual de los tres fue.
+    b) LA ATESTACION EXIGE PROCEDENCIA. No basta "la tarifa es 10 por mil":
+       hay que capturar el Acuerdo / articulo citado, quien atesta y cuando.
+       Sin procedencia no es testimonio, es repetir el borrador con otra
+       letra.
+    c) SE IMPRIME EN EL PAPEL con el nombre del auditor. Es su firma sobre
+       ese dato, no un parametro anonimo del sistema.
+    d) NO VA EN EL MANIFIESTO. El manifiesto declara identidad de archivos,
+       nunca valores (D1). La atestacion SI lleva un valor (la tarifa), asi
+       que necesita su propio archivo dentro de parametros/, versionado y con
+       procedencia. Si entrara al manifiesto se cae D1.
+    e) LA ATESTACION SE ACUMULA. Cada tupla atestada
+       (municipio, actividad, tarifa, vigencia) alimenta el paquete del
+       municipio. Asi el segundo mes en Santa Marta ya no requiere atestar de
+       nuevo, y la tabla de tarifas se construye sola cliente por cliente.
+       ESTO es lo que de verdad resuelve el "no ir revisando municipio por
+       municipio": no se evita el trabajo, se hace una vez y queda.
+    f) LIMITE QUE DEBE QUEDAR ESCRITO EN EL PAPEL: con C7 en ATESTADO, el
+       control NO es un recalculo independiente contra el estatuto. Es el
+       testimonio del auditor. Sigue siendo mas debil que cargar el Acuerdo,
+       y el papel no puede dar a entender lo contrario.
+    g) DEPENDENCIA CON X3: hoy C6 usa municipio.tarifas_actividad -- que sale
+       del borrador -- para decidir severidad. Con atestacion, C6 ya puede
+       medir impacto con respaldo. X3 se cierra por esta via.
+
+X2. Pedir el balance de prueba como insumo formal del cliente
+    No viene en la carpeta que entrega el cliente. Sin el, C2 sale NO
+    EJECUTADO y la revision pierde el amarre contable: el cruce
+    balance vs auxiliar es el que demuestra que el auxiliar esta completo.
+
+X3. Filtracion de la tabla de tarifas del borrador hacia C6
+    C7 se protege con NO EJECUTADO, correcto. Pero C6 usa
+    municipio.tarifas_actividad -- que hoy salio del borrador -- para decidir
+    si una discrepancia es HALLAZGO u OBSERVACION. El borrador decide la
+    severidad de la excepcion que se le levanta.
+    Arreglo interino: con estado PENDIENTE_VALIDACION_ESTATUTO, C6 degrada
+    todo a OBSERVACION y lo dice, en vez de fingir que puede medir impacto.
+
+================================================================================
+MENORES
+================================================================================
+
+M1. C8 contradice el spec: revisa fecha_documento, no fecha_contabilizacion.
+M2. C0 ABORTA con excepcion si una linea esta contabilizada fuera del periodo.
+    DECIDIDO 2026-09-09: pasa a ser EXCEPCION, no aborto.
+    Razon: el trabajo de C0 es la IDENTIDAD -- misma entidad, mismo periodo,
+    mismo tipo de documento. Un registro contabilizado tarde es asunto de
+    CORTE, que es lo de C8. Como esta hoy, una situacion perfectamente
+    legitima impide generar el papel.
+    OJO: esto AJUSTA una decision del spec (seccion 6, "C0 se detiene"), asi
+    que debe escribirse como cambio deliberado y no como correccion de bug.
+    El aborto de C0 se conserva para lo que si es identidad: NIT distinto,
+    periodo distinto, documento que no es del tipo declarado (1.5).
+    Se resuelve junto con M1: C8 debe mirar fecha_contabilizacion (corte
+    real) y ademas listar los desfases de fecha_documento.
+M3. C10 esta contenido en C9: su bucle de excepciones es literalmente la
+    segunda verificacion de C9. Duplica el hallazgo en el informe.
+M4. generar_papel(ruta_salida, ctx) tiene el orden de argumentos invertido
+    respecto a la intuicion. Cosmetico.
+M5. El papel generado tiene 6 hojas (Caratula, Controles, Liquidacion, Cruces,
+    Excepciones, Parametros); el PT manual del auditor tiene 9, incluyendo
+    "Check List" y "Validacion de facturas". Evaluar si falta algo.
+
+--------------------------------------------------------------------------------
+CORREGIR (aprobado por Felipe 2026-09-09) -- rapidos y quitan las criticas
+mas faciles de hacer
+--------------------------------------------------------------------------------
+
+M6. CODIGO DE SALIDA DEL CLI MIENTE
+    cli.py: return 0 if ctx.informe.impacto_total == 0 else 1
+    Verificado en la corrida real: devolvio exit=0 con C7, C12 y C14 sin
+    ejecutar y "Conclusion limpia: NO". Cualquier automatizacion que lea el
+    codigo de salida entiende "todo bien".
+    Arreglo: el codigo de salida debe reflejar la CONCLUSION, no solo el
+    impacto. Propuesta:
+      0 = puede_concluir_limpio
+      1 = ejecutado con excepciones (haya o no impacto)
+      2 = insumo obligatorio faltante / C0 detuvo (ya existe)
+      3 = hay controles NO EJECUTADO -> la revision no es concluyente
+
+M7. NO SE PUEDE DECIR QUE VERSION GENERO EL PAPEL
+    Verificado: no hay __version__ en ningun modulo, el papel no estampa
+    version de motor, y `git log` del proyecto esta VACIO -- todo el codigo
+    esta sin commitear. El papel SI registra el SHA-256 de las 4 fuentes
+    (hoja Parametros), pero no el del programa que las proceso.
+    Un papel de trabajo firmado que no se puede reproducir es la critica mas
+    facil de hacer y la mas barata de cerrar.
+    Arreglo: (a) commitear el proyecto; (b) __version__ en motor_reteica;
+    (c) estampar version del motor + hash del commit en la Caratula, al lado
+    de las huellas de las fuentes.
+
+M8. C11 SOBREAFIRMA SU ALCANCE
+    Informa "3 factura(s) cotejadas" habiendo verificado solo NIT y fecha, y
+    con 1 de las 3 sin poder leer. El detalle del control debe decir QUE se
+    cotejo y CUANTAS quedaron sin leer. Ej: "2 de 3 facturas cotejadas en NIT
+    y fecha; base y retencion no verificadas; 1 requiere cotejo manual".
+    Se cierra solo cuando entre 2.1 (verificar base y retencion).
+
+M10. QUITAR EL CONTROL DE FIRMA (decidido por Felipe 2026-09-09)
+    DECISION: se elimina el chequeo de firma de revisor fiscal.
+    Motivo de fondo: el objeto de prueba es un BORRADOR que la firma todavia
+    no ha firmado. Verificar ahi la firma del revisor fiscal no tiene sentido
+    en esta etapa del proceso.
+    Al quitarlo desaparece tambien el control silencioso descrito abajo, que
+    pasaba siempre.
+    Al implementar: quitar la excepcion de C13, quitar
+    firma_revisor_fiscal del dataclass Borrador o dejarlo como dato
+    informativo NO evaluado, y ajustar las pruebas que lo cubran.
+    Nota para el papel: si en algun momento se quiere verificar la firma,
+    corresponde al momento de la PRESENTACION de la declaracion, no a la
+    revision del borrador.
+
+    --- diagnostico original, se conserva como registro ---
+    *** CONTROL SILENCIOSO: LA FIRMA DEL REVISOR FISCAL NO SE VERIFICA ***
+    borrador_pdf.py:
+      firma_revisor_fiscal = any("FRMA_RVSR_FSCL" in l for l in lineas)
+    VERIFICADO: FRMA_RVSR_FSCL es una ETIQUETA IMPRESA del formulario, no una
+    firma. Aparece junto a 'FIRMA DECLARANTE' y 'FRMA_RPRSNTNTE_LGAL' en el
+    texto del formulario en blanco. El chequeo devuelve True SIEMPRE, este
+    firmado o no: C13 nunca puede fallar por este motivo.
+    Incomodidad adicional: verifica la firma de la PROPIA FIRMA sobre un
+    borrador que la firma todavia no ha firmado. Revisar si el control tiene
+    sentido en esta etapa del proceso o si debe moverse al momento de la
+    presentacion.
+    Es el mismo tipo de defecto que el motor viejo (control que pasa por
+    construccion) y no estaba detectado.
+
+M11. CUENTAS_EXCLUIDAS ES ESPECIFICA DE TERLICA, NO DEL PUC
+    parametros/puc.py se declara "constante del PUC, no configuracion por
+    cliente" y contiene:
+      CUENTAS_EXCLUIDAS = {"2368010090"}
+    2368010090 "Ret. Ffe ICA a pagar" es la subcuenta de TERLICA en SAP. En
+    otro cliente la contrapartida de pago tendria otro numero, pasaria como
+    retencion practicada e INFLARIA TODOS LOS CRUCES (C2, C3, C4, C9).
+    VERIFICADO: es_cuenta_reteica("2368019999") -> True.
+    ARREGLO DECIDIDO (2026-09-09): el motor DETECTA, el auditor DECIDE.
+    Felipe pidio darle al auditor la opcion de declarar que cuenta es; se le
+    agrega la deteccion automatica para que olvidarlo sea imposible.
+
+    1) El motor marca como CANDIDATAS A CONTRAPARTIDA las cuentas 2368 cuya
+       naturaleza no es credito. Tiene con que: en el balance de Terlica,
+       2368010090 es la UNICA cuenta 2368 con saldo positivo (+34.533.438)
+       mientras las demas son negativas. La contrapartida se delata por el
+       signo.
+    2) El auditor declara que es cada candidata: contrapartida de pago (se
+       excluye) o retencion practicada (se incluye). Queda escrito en el
+       papel, como la atestacion de X1.
+    3) Una candidata SIN DECLARAR no se incluye en silencio: C2 y C3 salen
+       NO EJECUTADO nombrando la cuenta pendiente de clasificar.
+
+    Motivo del paso 3: una lista configurable que hay que recordar llenar se
+    olvida, y olvidarla infla los cruces sin avisar. Con deteccion + bloqueo,
+    el motor no avanza hasta que alguien lo resuelva.
+    Es el mismo patron ya acordado para las columnas (1.4) y las tarifas
+    (X1): el programa senala lo que no puede decidir solo, la persona decide,
+    y queda impreso.
+    La exclusion sale de puc.py: no es constante del PUC.
+
+M12. EL BORRADOR TIENE 3 PAGINAS Y SE LEE SOLO LA PRIMERA
+    leer_borrador usa pdf.pages[0]. VERIFICADO que hoy es CORRECTO: las tres
+    paginas son copias identicas (original, declarante, banco) y cada una
+    trae las 5 filas de actividad y los 22 renglones. Leer todas triplicaria
+    las cifras.
+    Riesgo no documentado: si algun mes el cuadro C se desborda a una segunda
+    pagina real, se truncaria en silencio. Verificar que pasa con mas
+    actividades de las que caben en una pagina.
+
+M13. Excepcion.renglon ESTA SOBRECARGADO
+    El spec dice "renglon del formulario afectado", pero C2 mete la cuenta
+    contable, C3 mete el NIT y C6/C9 si meten el renglon. Importa para la
+    hoja de notas de 5.4, que va a ordenar y mostrar por esa columna.
+
+M9. LA HOJA "LIQUIDACION" TIENE NOMBRE INCOMODO
+    El seccion 2 del diseno insiste en que el objetivo NO es liquidar el
+    impuesto, y el papel entrega una hoja llamada "Liquidacion". Un lector
+    puede entender que la firma asumio el trabajo del cliente.
+    Igual el nombre del control C9 ("Liquidacion de auditoria vs borrador").
+    Arreglo: renombrar a algo como "Reconstruccion" o "Recalculo de
+    auditoria". Es redaccion, no motor.
+
+================================================================================
+RESULTADO DE LA CORRIDA CON DATOS REALES (2026-09-09, con balance de fixtures)
+================================================================================
+OK            C0 C1 C2 C3 C4 C5 C8 C9 C10
+FALLA         C6 (2 excepciones), C11 (2), C13 (1)
+NO EJECUTADO  C7 (Acuerdo), C12 (pago anterior), C14 (no aplica a Santa Marta)
+Impacto cuantificado: 0
+Sin balance: C2 pasa a NO EJECUTADO y C13 suma un aviso.
+
+Lo que SI detecto bien, sin que nadie se lo dijera:
+  - Reparacion de manguera de 2.546.000 en el renglon 4669 de comercio (C6)
+  - FE10: el proveedor declara actividad 7112, el borrador la pone en 7490 (C6)
+  - FE10: desfase documental, factura del 26/06 registrada con fecha de
+    documento 01/07. El spec seccion 6 predijo que esto solo seria visible
+    desde C11 y no desde C8, y asi fue exactamente.
+
+================================================================================
+PREGUNTAS ABIERTAS
+================================================================================
+
+P1. CERRADA 2026-09-09. Ni maestro de proveedores ni facturas son opcion. El
+    auditor acepta la clasificacion del borrador. Solucion adoptada: las tres
+    capas de 3.1.bis (piso deterministico cuenta<->clase de tarifa, capa IA
+    de plausibilidad, y declaracion de la limitacion en el papel).
+P2. CERRADA 2026-09-09. NO se construye OCR todavia. FE338057 no estaba
+    escaneada (1213 chars de texto); el arreglo del parser de numeros (2.0)
+    la recupera. El AVISO de cotejo manual queda como techo de C11 y se
+    revisa cuando aparezca una factura escaneada de verdad.
+    (Recomendacion de Claude, aprobada por Felipe.)
+
+P3. CERRADA 2026-09-09 -> ver M2. El registro tardio pasa a ser EXCEPCION,
+    no aborto.
+
+P4. CERRADA 2026-09-09. Que manda el prompt (era 5.7): el problema no son las
+    filas, son las columnas. Ver 5.7.
+
+P5. CERRADA 2026-09-09. Semaforo con C7 en ATESTADO: AMARILLO. Ver 5.3.
+
+================================================================================
+ETAPA 5 - ROL DE LA IA (definido 2026-09-09)
+================================================================================
+Estado actual: la IA NO participa en el proceso. revision_ia.py (83 lineas)
+tiene solo construir_prompt() y aplicar_revision(); entre las dos NO HAY NADA:
+ni cliente de API, ni import anthropic, ni llave, ni llamada de red. El unico
+lugar que importa el modulo es su propia prueba. El pipeline no la llama, el
+CLI no tiene bandera, y el papel no tiene hoja donde aterricen los
+comentarios. Los 3 casos que detecto la corrida real los encontro codigo
+deterministico: dos listas de palabras en controles.py:243.
+
+Lo que SI esta bien hecho y no se toca: el arnes de contencion. Comentario es
+un dataclass(frozen=True) de 3 campos de texto sin atributo estado, y el
+modulo no expone via para tocar un ResultadoControl ni el Informe. La
+separacion de la seccion 9 del diseno NO es una promesa del prompt, es una
+propiedad del tipo. Un modelo que alucine una cifra no tiene por donde
+meterla.
+
+--------------------------------------------------------------------------------
+D6. REGLA RECTORA DE LA IA
+--------------------------------------------------------------------------------
+La IA puede proponer cualquier cosa que el motor deterministico pueda
+REFUTAR. Si la respuesta es falsificable por aritmetica o por un humano en
+diez segundos, la no-determinacion deja de importar: una alucinacion no pasa
+el filtro. Si no es falsificable, no entra.
+
+Tres grados:
+  Grado 1 - refutable por aritmetica (el motor recalcula y se cae sola)
+  Grado 2 - consecuencia deterministica + evidencia citable
+  Grado 3 - no refutable (opinion)
+
+--------------------------------------------------------------------------------
+D7. CARRIL PROPIO DE CONTROLES
+--------------------------------------------------------------------------------
+Problema que resuelve: hoy los comentarios de la IA no tienen ni hoja en el
+papel. Un comentario en un anexo no cambia nada; una excepcion que impide
+concluir limpio, si.
+
+  - La IA NO modifica jamas C0..C14. Esa frontera se queda como esta.
+  - Sus salidas entran como controles PROPIOS: IA-1 clasificacion,
+    IA-2 extraccion documental, IA-3 consistencia de la conclusion.
+    Cada uno con sus 3 estados y excepciones tipificadas por severidad.
+  - Caen por la maquinaria que ya existe: consolidar() los ordena,
+    puede_concluir_limpio se pone en falso, la conclusion los nombra.
+    Un hallazgo de la IA bloquea la conclusion limpia igual que uno de C9.
+  - SIMETRIA CLAVE: si el modelo no se puede llamar (sin llave, sin red,
+    error de API) esos controles salen NO EJECUTADO, nunca OK. Igual que un
+    archivo faltante. La IA es un insumo del papel con la misma disciplina
+    que el balance de prueba.
+
+--------------------------------------------------------------------------------
+D8. LO QUE LA IA NO HACE, NUNCA
+--------------------------------------------------------------------------------
+  - Calcular o ajustar una cifra que nada pueda verificar.
+  - Decidir el estado de un control deterministico.
+  - Redactar la conclusion (se deriva de estados; asi se queda).
+  - Elegir una tolerancia, una tarifa, un renglon o una columna.
+    Eso es parametros/ y la seccion 3 del diseno lo prohibe.
+  - Calcular el semaforo de 5.3 (es deterministico, sale de estados).
+
+--------------------------------------------------------------------------------
+D9. REPRODUCIBILIDAD (no se puede hacer deterministica; si auditable)
+--------------------------------------------------------------------------------
+  - Temperatura en cero.
+  - Prompt VERSIONADO, con su hash impreso en la hoja Parametros del papel,
+    junto al id y version exacta del modelo.
+  - La respuesta cruda se ARCHIVA como evidencia, igual que el SHA-256 de
+    las fuentes. Si en marzo preguntan por que la IA dijo lo que dijo,
+    existe el texto.
+  - Regla que sostiene todo: ningun estado de control depende de una salida
+    de IA no verificada. Dos meses pueden dar comentarios distintos --
+    inevitable -- pero NUNCA un impuesto distinto ni un control en verde que
+    no lo estuviera.
+
+--------------------------------------------------------------------------------
+5.1 LECTURA DE DOS VIAS PARA FACTURAS (grado 1) -- DECIDIDO
+--------------------------------------------------------------------------------
+Motivacion: FE338057 (355 KB) no se parsea, 1 de 3 facturas de la muestra.
+El 33% de la muestra documental queda hoy a cotejo manual.
+
+Por que dos pasadas del mismo modelo sobre la misma imagen NO sirven:
+a temperatura cero dan lo mismo siempre -- coincidirian por construccion y la
+comparacion no probaria nada. Y si difieren, repetirlas da la misma
+discrepancia para siempre: bucle infinito.
+
+DECISION (confirmada 2026-09-09): es una ESCALADA, no un proceso paralelo.
+La lectura por IA NO corre siempre. Solo cuando el PDF no se puede leer
+naturalmente o la lectura tradicional no da confianza (ver 5.2).
+Abarata el proceso y evita mandar afuera facturas que se leen bien.
+
+  Paso 0: parser tradicional (pdfplumber). Si la confianza es ALTA, TERMINA.
+          No se llama a la IA.
+  Si no:
+  Via 1: IA lee el PDF como imagen pidiendo los campos (NIT, base,
+         retencion, actividad declarada, fecha, numero).
+  Via 2: IA lee el PDF como imagen TRANSCRIBIENDO el bloque relevante; el
+         motor extrae los campos del texto transcrito.
+         -> son planteamientos distintos, no la misma pregunta dos veces.
+  Via 3: si habia texto extraible, la lectura tradicional se suma como
+         tercera voz de corroboracion (aunque su confianza fuera baja).
+
+Reglas de resolucion:
+  - Coincidir NO es acertar: dos lecturas pueden equivocarse igual. Ancla
+    externa gratis -> base x tarifa == retencion del auxiliar.
+    Verificado: 250530 -> 18.296 = 18.296; FE10 -> 35.000 = 35.000.
+  - El dato entra al papel solo si COINCIDEN Y CUADRAN contra el auxiliar.
+  - Si coinciden pero NO cuadran -> HALLAZGO. La factura y la contabilidad
+    no dicen lo mismo: es exactamente lo que C11 debe cazar.
+  - Si no coinciden -> se repiten las lecturas. TOPE 2 o 3 intentos.
+  - Agotado el tope -> REQUIERE_COTEJO_MANUAL como AVISO.
+    NUNCA elegir una de las dos lecturas a dedo.
+
+--------------------------------------------------------------------------------
+5.2 SISTEMA DE CONFIANZA (cuando escalar a la IA) -- DECIDIDO
+--------------------------------------------------------------------------------
+Hoy es binario y pobre: facturas_pdf.py:114
+  confianza = ALTA if (nit and base is not None) else REQUIERE_REVISION
+Es un chequeo de PRESENCIA, no de confianza.
+
+DIAGNOSTICO REAL DE FE338057 (medido, no supuesto):
+  chars extraidos = 1213  ->  NO es un PDF escaneado, SI tiene capa de texto
+  Fallo por dos cosas distintas:
+  a) capas de texto superpuestas que interleavan caracteres:
+       "Contacto : COP Contacto : FFFeeeccchh.Gaaener 16/07/2026"
+  b) la base SI esta en el texto pero con formato ingles (coma de miles,
+     punto decimal) y el parser la perdio:
+       "1 ESG16 Escualizador Surtidor Gasoli 1 7.00 UND 170,999.00 0.00
+        1,196,993.00 19.00"
+     1.196.993 es exactamente la parte de CDEM del renglon 4669
+     (1.196.993 + 2.546.000 = 3.742.993). Se podia extraer.
+  c) el unico NIT de la cabecera es 819002433-6, que es el de TERLICA
+     (el cliente), no el del proveedor.
+CONSECUENCIA: esta factura no necesitaba IA, necesitaba un parser de numeros
+mejor. La senal util no es "no pude leer", es "lei algo que no cuadra".
+
+SENALES DE PRESENCIA (baratas, se calculan en el parser):
+  S1  menos de ~100 caracteres extraidos -> PDF escaneado de verdad
+  S2  texto corrupto: rachas de 3+ del mismo caracter dentro de palabras
+      (FFFeeeccchh) o exceso de caracteres de reemplazo
+  S3  NIT del proveedor o base ausentes
+  S4  el unico NIT hallado es el del contribuyente -> no se identifico al
+      proveedor
+
+SENAL DE CORRECCION (la que de verdad importa):
+  S5  base x tarifa != retencion del auxiliar
+
+S5 es la unica que verifica que el dato este BIEN, no solo que este. Hoy una
+factura con la base mal leida sale ALTA y pasa derecho.
+Cualquiera de las cinco escala a la lectura de dos vias de 5.1.
+
+CONSECUENCIA DE ARQUITECTURA: S5 no se puede calcular dentro de
+facturas_pdf.py porque necesita el auxiliar. La evaluacion de confianza tiene
+que vivir en C11, no en la ingesta. La ingesta calcula S1..S4 y reporta; C11
+agrega S5 y decide si escala.
+
+TAREA APARTE (no es IA): arreglar el parser de numeros para aceptar formato
+ingles (1,196,993.00) ademas del colombiano. Eso solo ya recupera FE338057.
+
+--------------------------------------------------------------------------------
+5.3 SEMAFORO DE SOLIDEZ DE LA REVISION -- DECIDIDO
+--------------------------------------------------------------------------------
+Califica la SOLIDEZ DE LA REVISION (no la calidad del borrador del cliente).
+Semaforo, no puntaje numerico. DETERMINISTICO: se deriva de los estados de
+control, la IA no lo calcula.
+
+Insumos que ya existen en el Informe: controles_en_falla,
+controles_no_ejecutados, controles_no_aplicables, impacto_total,
+puede_concluir_limpio.
+
+Regla (decidida 2026-09-09):
+  ROJO      algun control NO EJECUTADO, o hallazgo con impacto en pesos
+            -> la revision no respalda una conclusion limpia
+  AMARILLO  todos ejecutados, con excepciones sin impacto
+            TAMBIEN amarillo si C7 quedo en ATESTADO: la revision se
+            sostiene, pero sobre el testimonio del auditor y no sobre fuente
+            externa
+  VERDE     todos ejecutados y sin excepciones. Exige el Acuerdo municipal
+            cargado; con C7 en ATESTADO nunca se llega a verde.
+
+Ancla con la corrida real de julio 2026:
+  9 OK | falla C6 C11 C13 | no ejecutados C7 C12 | no aplica C14 | impacto 0
+  -> ROJO (C7 sin Acuerdo municipal, C12 sin pago anterior)
+
+--------------------------------------------------------------------------------
+5.4 HOJA DE NOTAS AL FRENTE DEL PAPEL -- DECIDIDO
+--------------------------------------------------------------------------------
+Problema: las conclusiones largas no se leen y las notas de la IA no
+destacan. Hoy el papel tiene 6 hojas y ninguna es un resumen para leer
+primero.
+
+Cambio: PRIMERA hoja del papel, antes de la caratula. Semaforo arriba. Una
+linea por nota, ordenadas por importancia, SIN PARRAFOS. Forma:
+
+  [!] 4669  Reparacion de $2.546.000 en renglon de comercio   impacto $0
+  [!] FE10  Proveedor declara 7112, borrador dice 7490        impacto $0
+  [-] C7    Sin Acuerdo municipal: tarifas sin validar        NO EJECUTADO
+
+La conclusion completa se queda donde esta; esta hoja es la puerta de
+entrada, no su reemplazo.
+
+--------------------------------------------------------------------------------
+5.5 IA-1 CLASIFICADOR CON EVIDENCIA (grado 2) -- NO ES ETAPA 5, ES 3.1
+--------------------------------------------------------------------------------
+OJO: esto NO es un anadido al final del motor. Es la respuesta a la pregunta
+P1 y por tanto parte del arreglo 3.1, el mas serio de la lista. La IA seria
+la FUENTE INDEPENDIENTE que hoy le falta al motor.
+
+Hoy el juicio de clasificacion lo hace una lista de palabras (controles.py:243):
+  _naturaleza("SUMINISTRO E INSTALACION DE VALVULA") -> "SERVICIO"
+  golpea las DOS listas (SUMINISTRO=comercio, INSTALACION=servicio) y gana
+  servicio PORQUE SE CHEQUEA PRIMERO. No hay juicio, hay orden de lineas.
+Y el control es ASIMETRICO: C6 solo dispara cuando un servicio esta en un
+renglon de comercio, nunca al reves. Una compra sentada en el renglon 5224
+de puertos es invisible.
+Medido sobre las 12 lineas reales: 0 se le escapan a la lista (11 SERVICIO,
+1 COMERCIO), asi que el hueco no es cobertura -- es la ambiguedad y la
+asimetria.
+
+Exigencias si la IA toma este rol:
+  - Que CITE el texto que sustenta la clasificacion (concepto de la linea,
+    actividad declarada en la factura).
+  - Que la CONSECUENCIA la calcule el motor: CIIU -> tarifa del municipio
+    -> impacto en pesos. La IA no toca una cifra.
+  - Que discrepar del borrador genere EXCEPCION, no veredicto. No dice
+    "esta mal clasificado"; dice "el concepto sugiere 4520 y el borrador
+    dice 4669; la tarifa difiere y el impacto que calculo el motor es $X".
+
+--------------------------------------------------------------------------------
+5.6 IA-3 REVISOR DE JUICIO (grado 3)
+--------------------------------------------------------------------------------
+Es lo que ya existe en revision_ia.py. Se queda, recanalizado por D7 para
+que no muera en un anexo. Cuestiona si la conclusion es consistente con las
+excepciones abiertas y si alguna observacion deberia escalar a hallazgo.
+
+--------------------------------------------------------------------------------
+5.7 PRIVACIDAD Y COSTO DEL PROMPT
+--------------------------------------------------------------------------------
+construir_prompt() manda hoy las 12 lineas del auxiliar COMPLETAS, con NIT,
+concepto y retencion del cliente, hacia un servicio externo. Con 12 lineas es
+trivial; con un cliente de 4.000 lineas mensuales no lo es, ni en costo ni en
+confidencialidad.
+
+DECIDIDO 2026-09-09: el problema NO son las filas, son las COLUMNAS.
+IA-1 (plausibilidad) tiene que juzgar linea por linea, asi que necesita la
+POBLACION COMPLETA. Pero solo necesita tres campos:
+    concepto  |  cuenta  |  renglon asignado
+NO se envia: NIT, nombre del tercero, montos, ni razon social del cliente.
+Hoy el prompt manda NIT, nombre y retencion de cada linea SIN NECESITARLOS.
+Con la reduccion de columnas el riesgo de confidencialidad casi desaparece y
+4.000 lineas de texto corto siguen siendo baratas.
+Excepcion: IA-3 (revisor de juicio) si necesita ver excepciones y conclusion,
+pero eso ya es agregado, no linea por linea.
+
+--------------------------------------------------------------------------------
+5.8 FALTA EL CABLEADO (trabajo mecanico)
+--------------------------------------------------------------------------------
+Cliente de API, bandera de CLI, hoja(s) del papel, manejo de la llave.
+Nota de proyecto: en Facturix la llave real va en la GUI, no en .env.
+
+
+================================================================================
+================================================================================
+ESTADO GENERAL DEL PROYECTO -- cierre de la sesion de diseno 2026-09-09
+================================================================================
+================================================================================
+
+QUE ES ESTO
+-----------
+Motor de revision de ReteICA. La firma actua como revisor fiscal: el cliente
+prepara el borrador de la declaracion mensual y la firma lo revisa y LO FIRMA.
+El motor NO liquida el impuesto; produce EVIDENCIA DE REVISION sobre un
+borrador ajeno. Cliente piloto: TERLICA (NIT 819002433-6), Santa Marta,
+julio 2026.
+
+DONDE ESTA HOY
+--------------
+Producto funcional, no prototipo. 3.114 lineas de Python, 15 controles
+(C0..C14), 151 pruebas verdes en ~22s, papel de trabajo de 6 hojas.
+Corrida verificada con datos reales el 2026-09-09:
+  OK            C0 C1 C2 C3 C4 C5 C8 C9 C10
+  FALLA         C6, C11, C13
+  NO EJECUTADO  C7, C12, C14(no aplica)
+  Impacto cuantificado: $0 | Conclusion limpia: NO
+Anclas reproducidas al peso: auxiliar 474.561 = ERP 474.561; base gravable
+49.012.569; impuesto declarable 474.000 vs declarado 474.000; los 561 pesos de
+diferencia explicados como redondeo al mil por renglon, no como diferencia de
+impuesto.
+
+Detecto por su cuenta los tres casos reales del mes: la reparacion de
+2.546.000 en el renglon 4669 de comercio, la actividad 7112 que el proveedor
+declara contra el 7490 del borrador, y el desfase documental de FE10 (factura
+del 26/06 registrada con fecha de documento 01/07). El spec habia predicho que
+ese ultimo solo seria visible desde C11 y no desde C8, y asi fue.
+
+LO MEJOR QUE TIENE
+------------------
+  - Tres estados de control (OK / FALLA / NO EJECUTADO) y conclusion DERIVADA
+    de esos estados, no redactada. Es lo que fallo en el papel manual.
+  - El diagnostico de C4: haber visto que derivar la base de la retencion hace
+    que base x tarifa devuelva la retencion por construccion, y haberlo
+    cuantificado (49.012.586 derivado vs 49.012.569 real). Error silencioso
+    cazado antes de escribirlo.
+  - La limitacion de integridad impresa en la conclusion, no escondida.
+  - Ingesta por ETIQUETA de columna, no por posicion: sobrevive a que SAP mueva
+    una columna. Las trampas de cada formato estan documentadas en el codigo.
+  - El arnes de contencion de la IA: Comentario es frozen y sin campo estado.
+    La separacion "la IA no calcula" es una propiedad del tipo, no una promesa
+    del prompt.
+
+LO QUE NO ESTA
+--------------
+  - La IA NO participa en el proceso. revision_ia.py tiene prompt y parser;
+    entre los dos no hay cliente de API, ni llave, ni llamada de red.
+  - Ni un commit de git. El estado actual (151 verdes, anclas exactas) no se
+    puede recuperar si algo se rompe. ES LO PRIMERO QUE HAY QUE HACER.
+  - Cero prueba ciega: las fixtures son BYTE-IDENTICAS a los datos reales de
+    julio. El motor nunca se ha corrido contra un mes que no haya visto.
+  - La carpeta del cliente no arranca: exige nombres de archivo literales.
+  - El balance de prueba no viene en lo que entrega el cliente.
+
+LAS TRES AMENAZAS REALES A UNA FIRMA
+------------------------------------
+  1. CIRCULARIDAD DEL REPARTO (3.1). El mapa NIT->renglon se deriva del
+     borrador emparejando montos, y luego C9 compara contra ese mismo
+     borrador. Demostrado: mutar el codigo de actividad a 9999 -- un CIIU
+     inexistente -- y C9 sigue diciendo OK. Resuelto por diseno en 3.1.bis
+     (tres capas), sin implementar.
+  2. FRAGILIDAD ESTRUCTURAL (3.2/3.3/3.4). Julio cumple por casualidad
+     5 terceros = 5 renglones = 1 tarifa por tercero. Con dos proveedores en
+     la misma actividad el motor emite un HALLAZGO FALSO; con NITs repetidos
+     en el ERP colapsa filas; con un tercero de dos tarifas da una diferencia
+     falsa de 7.000.
+  3. TARIFAS SIN FUENTE EXTERNA (X1). Salen del borrador que se esta
+     revisando. Resuelto por diseno via atestacion del auditor + estado
+     ATESTADO, sin implementar.
+
+EL PATRON DE DISENO QUE EMERGIO EN ESTA SESION
+----------------------------------------------
+Tres decisiones distintas llegaron a la misma forma: EL MOTOR SENALA LO QUE NO
+PUEDE DECIDIR SOLO, LA PERSONA DECIDE, Y QUEDA IMPRESO EN EL PAPEL.
+  - columnas del balance que no reconoce           (1.4)
+  - tarifas sin Acuerdo municipal                  (X1)
+  - cuentas candidatas a contrapartida de pago     (M11)
+En los tres casos, no declarar NO produce un OK: produce NO EJECUTADO y el
+motor no avanza. Conviene que compartan UN SOLO mecanismo de atestacion en el
+codigo, no tres implementaciones.
+Regla que los une, heredada de la seccion 3 del spec: el borrador es objeto de
+prueba, nunca fuente de parametros.
+
+Y para la IA, la regla equivalente (D6): la IA puede proponer cualquier cosa
+que el motor pueda REFUTAR. Blindaje por aritmetica donde se puede (5.1),
+evidencia citable donde no (3.1.bis capa 2), y carril propio de controles para
+que un hallazgo suyo bloquee la conclusion limpia sin tocar C0..C14 (D7).
+
+ORDEN DE EJECUCION RECOMENDADO
+------------------------------
+  0. Commitear. Sin esto no hay vuelta atras.
+  1. M6 (codigo de salida) + M7 (version en el papel). Minutos, y quitan las
+     dos criticas mas faciles de hacer.
+  2. 2.0 parser de numeros. Recupera FE338057 sin IA.
+  3. Etapa 1: manifiesto, sinonimos de columna, tipo de documento en C0.
+     Riesgo cero sobre las cifras.
+  4. 2.1: C11 verifique base y retencion. Convierte el control documental en
+     el mas solido del motor.
+  5. Etapa 3 completa (3.1.bis + 3.2 + 3.3 + 3.4 + 3.5). ANTES de meter otro
+     mes u otro cliente.
+  6. X1 atestacion, M11 contrapartida, M10 quitar firma, M1/M2 corte.
+  7. Etapa 4: C12 con el FORMATO RETEICA y el S_ALR.
+  8. Etapa 5: cablear la IA, semaforo, hoja de notas al frente.
+
+CRITERIO DE NO-REGRESION, EN TODA ETAPA
+---------------------------------------
+151 pruebas verdes y las anclas de julio 2026 intactas. Cualquier cambio que
+las rompa se revierte. Y a partir de la etapa 3, agregar la prueba estructural
+correspondiente: un motor probado solo con datos correctos no esta probado.
+
+ESTADO DE LAS DECISIONES
+------------------------
+Ninguna decision pendiente de Felipe. D1..D9 tomadas, P1..P5 cerradas,
+X1 y 3.1 resueltos por diseno, M1..M13 con arreglo definido.
+Todo el backlog es ejecutable.
+Nada de esto esta implementado: esta sesion fue de diagnostico y diseno, no se
+toco una linea del motor.
