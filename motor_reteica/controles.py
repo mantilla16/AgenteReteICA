@@ -291,9 +291,27 @@ def c6_clasificacion_por_linea(reconstruccion, facturas, mapa_actividad,
     por_nit = {f.nit: f for f in (facturas or []) if f.nit}
     excepciones = []
 
+    def _renglon_de(nit, tarifa=None):
+        """3.3/3.4: el mapa se llavea por grupo (NIT, tarifa).
+
+        Se acepta tambien la llave por NIT para no romper llamadas antiguas.
+        Cuando solo se conoce el NIT -- el cotejo contra la factura -- se
+        resuelve si el tercero tiene un unico renglon asignado.
+        """
+        if tarifa is not None:
+            directo = mapa_actividad.get((nit, tarifa))
+            if directo is not None:
+                return directo
+        simple = mapa_actividad.get(nit)
+        if simple is not None:
+            return simple
+        suyos = {codigo for clave, codigo in mapa_actividad.items()
+                 if isinstance(clave, tuple) and clave[0] == nit}
+        return suyos.pop() if len(suyos) == 1 else None
+
     for valorada in reconstruccion.lineas_valoradas:
         linea = valorada.linea
-        codigo = mapa_actividad.get(linea.nit)
+        codigo = _renglon_de(linea.nit, valorada.tarifa)
         if codigo is None:
             continue
         if _naturaleza(linea.concepto) == "SERVICIO" and codigo.startswith(
@@ -307,7 +325,7 @@ def c6_clasificacion_por_linea(reconstruccion, facturas, mapa_actividad,
                 renglon=codigo, impacto_pesos=_CERO))
 
     for nit, factura in sorted(por_nit.items()):
-        declarada = mapa_actividad.get(nit)
+        declarada = _renglon_de(nit)
         en_factura = factura.actividad_declarada
         if not en_factura or not declarada or en_factura == declarada:
             continue
@@ -537,17 +555,58 @@ def c14_compras_vs_servicios(reconstruccion, municipio) -> ResultadoControl:
 # Control terminal
 # --------------------------------------------------------------------------
 
-def c9_reconstruccion_vs_borrador(reconstruccion, borrador) -> ResultadoControl:
+def c9_reconstruccion_vs_borrador(reconstruccion, borrador,
+                                  mapa_asignado=None) -> ResultadoControl:
     """Confronta la reconstruccion independiente contra el borrador.
 
     Es el control terminal: todos los demas existen para que este signifique
     algo. Compara renglon por renglon en base e impuesto declarables.
     """
-    nombre = "Liquidacion de auditoria vs borrador de la declaracion"
+    nombre = "Recalculo de auditoria vs borrador de la declaracion"
     declarado = {a.codigo: a for a in borrador.actividades}
     reconstruido = reconstruccion.por_actividad
     excepciones = []
 
+    # ---- CAPA 1: coherencia entre la cuenta contable y la clase de tarifa ---
+    # La tarifa del grupo sale de la CUENTA, que esta en el auxiliar. La clase
+    # de cada renglon sale del borrador. Si el borrador no declara ningun
+    # renglon de la clase que exige la contabilidad, la contradiccion es real
+    # y mueve pesos. Es el unico filo independiente que tiene la clasificacion.
+    # El reparto viaja en la reconstruccion; el parametro solo existe para
+    # sobreescribirlo en pruebas.
+    if mapa_asignado is None:
+        mapa_asignado = getattr(reconstruccion, 'mapa', {}) or {}
+    clases_declaradas = {a.tarifa for a in borrador.actividades}
+    sin_asignar = []
+    for clave, grupo in sorted(reconstruccion.por_grupo.items()):
+        if clave in mapa_asignado or grupo.nit in mapa_asignado:
+            continue
+        if grupo.tarifa not in clases_declaradas:
+            excepciones.append(Excepcion(
+                severidad=Severidad.HALLAZGO, control="C9",
+                descripcion="NIT %s: la cuenta contable implica una tarifa de "
+                            "%s y el borrador no declara ningun renglon a esa "
+                            "tarifa (declara %s)"
+                            % (grupo.nit, grupo.tarifa,
+                               ", ".join(str(t) for t in sorted(
+                                   clases_declaradas))),
+                renglon=grupo.nit,
+                impacto_pesos=grupo.retencion_contable))
+        else:
+            sin_asignar.append(grupo)
+
+    # 3.2: un grupo que no se pudo repartir NO es un hallazgo. Es la ausencia
+    # de un reparto reproducible, y se declara como tal.
+    for grupo in sin_asignar:
+        excepciones.append(Excepcion(
+            severidad=Severidad.AVISO, control="C9",
+            descripcion="NIT %s (%s): el borrador declara varios renglones a "
+                        "esa tarifa y ninguno cuadra con su base; el reparto "
+                        "de este tercero no se pudo reproducir"
+                        % (grupo.nit, grupo.tarifa),
+            renglon=grupo.nit))
+
+    # ---- montos por renglon --------------------------------------------------
     for codigo in sorted(set(declarado) | set(reconstruido)):
         actividad = declarado.get(codigo)
         renglon = reconstruido.get(codigo)
@@ -587,5 +646,16 @@ def c9_reconstruccion_vs_borrador(reconstruccion, borrador) -> ResultadoControl:
                 impacto_pesos=abs(renglon.impuesto_declarable
                                   - actividad.impuesto)))
 
-    return _resolver("C9", nombre, excepciones,
-                     "%d renglon(es) sin diferencia" % len(reconstruido))
+    # ---- CAPA 3: el limite se declara, no se esconde -----------------------
+    limite = ("montos verificados renglon por renglon; el REPARTO de terceros "
+              "por renglon se tomo del borrador y NO se verifico de forma "
+              "independiente (el auxiliar trae el concepto, no el codigo CIIU)")
+    detalle = "%d renglon(es) sin diferencia en montos; %s" % (
+        len(reconstruido), limite)
+    if excepciones:
+        detalle = "%d excepcion(es); %s" % (len(excepciones), limite)
+
+    return ResultadoControl(
+        codigo="C9", nombre=nombre,
+        estado=Estado.FALLA if excepciones else Estado.OK,
+        detalle=detalle, excepciones=tuple(excepciones))

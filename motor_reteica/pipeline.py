@@ -60,37 +60,80 @@ class ContextoRevision:
     manifiesto: object = None
 
 
-def _mapa_actividad(borrador, filas_erp, lineas, municipio):
-    """Asigna cada tercero a un renglon del borrador.
+_TOLERANCIA_REDONDEO = Decimal("1000")
 
-    Se toma del borrador SOLO para agrupar. La tarifa y la base nunca salen
-    de aqui: vienen de la cuenta contable y del reporte del ERP.
-    """
-    base_por_nit = {f.nit: f.base for f in (filas_erp or [])}
+
+def _bases_por_grupo(filas_erp, lineas, municipio):
+    """Base de cada grupo (NIT, tarifa). Del ERP si esta; derivada si no."""
+    del_erp = {}
+    for fila in (filas_erp or []):
+        tarifa = municipio.tarifa_por_codigo_ret.get(fila.codigo_ret)
+        if tarifa is None:
+            continue
+        clave = (fila.nit, tarifa)
+        del_erp[clave] = del_erp.get(clave, Decimal("0")) + fila.base
+
     # Sin reporte del ERP la base se deriva de la retencion: es imprecisa
     # (hasta 91 pesos por tercero) pero basta para emparejar renglones, que
     # es lo unico que este mapa hace.
     derivadas = {}
     for linea in lineas:
         tarifa = municipio.tarifa_por_cuenta[linea.cuenta]
-        derivadas[linea.nit] = derivadas.get(linea.nit, Decimal("0")) + (
+        clave = (linea.nit, tarifa)
+        derivadas[clave] = derivadas.get(clave, Decimal("0")) + (
             linea.retencion / tarifa).quantize(Decimal("1"))
 
-    mapa = {}
-    disponibles = list(borrador.actividades)
+    return {clave: del_erp.get(clave, derivada)
+            for clave, derivada in derivadas.items()}
 
-    for nit in sorted({l.nit for l in lineas}):
-        base = base_por_nit.get(nit, derivadas.get(nit))
-        elegida = None
-        if base is not None:
-            for actividad in disponibles:
-                if actividad.base == base or abs(actividad.base - base) < 1000:
-                    elegida = actividad
-                    break
-        if elegida is not None:
-            mapa[nit] = elegida.codigo
-            disponibles.remove(elegida)
+
+def mapa_actividad(borrador, filas_erp, lineas, municipio):
+    """Asigna cada grupo (NIT, tarifa) a un renglon del borrador.
+
+    LIMITE, declarado en 3.1.bis y en C9: esto NO reconstruye la
+    clasificacion. El auxiliar trae el concepto, no el codigo CIIU, asi que el
+    reparto se toma del borrador. Lo que este mapa si garantiza es que un
+    grupo NUNCA se asigne a un renglon de otra CLASE DE TARIFA: la tarifa del
+    grupo viene de la cuenta contable, que esta en el auxiliar y no en el
+    borrador. Esa restriccion es la CAPA 1 y es lo que hace que la
+    contradiccion aflore en vez de quedar tapada por un emparejamiento de
+    montos.
+
+    3.2: varios grupos pueden caer en el mismo renglon. Antes el renglon se
+    consumia con disponibles.remove() y el segundo grupo quedaba sin codigo,
+    lo que producia un HALLAZGO FALSO en C9.
+    """
+    bases = _bases_por_grupo(filas_erp, lineas, municipio)
+    mapa = {}
+
+    por_clase = {}
+    for actividad in borrador.actividades:
+        por_clase.setdefault(actividad.tarifa, []).append(actividad)
+
+    for clave in sorted(bases):
+        _, tarifa = clave
+        candidatos = por_clase.get(tarifa, [])
+        if not candidatos:
+            # Sin renglon de esa clase de tarifa: lo detecta C9 (capa 1).
+            continue
+
+        if len(candidatos) == 1:
+            mapa[clave] = candidatos[0].codigo
+            continue
+
+        base = bases[clave]
+        coinciden = [a for a in candidatos
+                     if abs(a.base - base) < _TOLERANCIA_REDONDEO]
+        if len(coinciden) == 1:
+            mapa[clave] = coinciden[0].codigo
+        # Si ninguno o varios coinciden, el grupo queda sin asignar y C9 lo
+        # avisa. Elegir "el mas parecido" seria inventar el reparto.
+
     return mapa
+
+
+# Nombre anterior, conservado para compatibilidad interna.
+_mapa_actividad = mapa_actividad
 
 
 def _resolver_via_manifiesto(carpeta, manifiesto):
@@ -185,7 +228,7 @@ def revisar(carpeta, nit, periodo, municipio) -> ContextoRevision:
         controles.c6_clasificacion_por_linea(recon, facturas, mapa, municipio),
         controles.c7_tarifas_vs_estatuto(borrador, municipio),
         controles.c8_corte(lineas, periodo),
-        controles.c9_reconstruccion_vs_borrador(recon, borrador),
+        controles.c9_reconstruccion_vs_borrador(recon, borrador, mapa),
         controles.c10_redondeo(borrador, recon),
         controles.c11_cotejo_facturas(lineas, facturas, municipio),
         controles.c12_continuidad(None, None),

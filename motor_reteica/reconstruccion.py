@@ -15,7 +15,7 @@ El mapa de actividades se toma del borrador SOLO para agrupar en renglones,
 nunca para tarifar ni para valorar.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal, ROUND_HALF_UP
 
 MIL = Decimal("1000")
@@ -93,6 +93,10 @@ class Reconstruccion:
     total_impuesto_contable: Decimal
     total_impuesto_declarable: Decimal
     base_es_derivada: bool
+    # 3.1.bis: el reparto viaja CON la reconstruccion. Si C9 lo recibiera
+    # aparte podria llamarse sin el y tratar como "sin asignar" a grupos que
+    # si lo estaban, inventando avisos.
+    mapa: dict = field(default_factory=dict)
 
     @property
     def por_tercero(self) -> dict:
@@ -166,4 +170,5 @@ def reconstruir(lineas, filas_erp, municipio, mapa_actividad) -> Reconstruccion:
         total_impuesto_declarable=sum(
             (r.impuesto_declarable for r in por_actividad.values()), Decimal("0")),
         base_es_derivada=base_es_derivada,
+        mapa=dict(mapa_actividad),
     )
