@@ -5,7 +5,7 @@ Ningun control lee parametros del borrador: el borrador es objeto de prueba.
 """
 
 from collections import defaultdict
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 from motor_reteica.parametros.tolerancias import TOLERANCIAS
 from motor_reteica.tipos import Estado, Excepcion, ResultadoControl, Severidad
@@ -338,22 +338,33 @@ def c8_corte(lineas, periodo) -> ResultadoControl:
                      "%d linea(s) dentro del periodo %s" % (len(lineas), periodo))
 
 
-def c11_cotejo_facturas(lineas, facturas) -> ResultadoControl:
+def c11_cotejo_facturas(lineas, facturas, municipio) -> ResultadoControl:
+    """Cotejo del documento fuente contra el registro contable.
+
+    Es el UNICO control que va de la factura al auxiliar sin pasar por el ERP
+    ni por el borrador. La tarifa se toma de la cuenta contable -- que esta en
+    el auxiliar -- y jamas del borrador: por eso el amarre es independiente
+    del objeto de prueba.
+
+        base_del_PDF x tarifa_de_la_cuenta == retencion_del_auxiliar
+
+    Cada campo se verifica POR SEPARADO. Antes, una factura sin NIT legible se
+    descartaba entera y su base -- que si se habia podido leer -- no se
+    cotejaba nunca. FE338057 es justo ese caso: sin NIT en la capa de texto,
+    pero con base 1.196.993 que cuadra al peso contra los 11.970
+    contabilizados.
+    """
     nombre = "Cotejo de la factura fuente contra el auxiliar"
     if not facturas:
         return _no_ejecutado("C11", nombre, "las facturas fuente")
 
     por_referencia = {l.referencia: l for l in lineas}
     excepciones = []
+    con_base_verificada = 0
+    sin_nit = 0
+    sin_base = 0
 
     for factura in facturas:
-        if factura.confianza != "ALTA":
-            excepciones.append(Excepcion(
-                severidad=Severidad.AVISO, control="C11",
-                descripcion="%s: no se pudo extraer NIT o base del PDF; "
-                            "requiere cotejo manual" % factura.numero))
-            continue
-
         linea = por_referencia.get(factura.numero)
         if linea is None:
             excepciones.append(Excepcion(
@@ -362,12 +373,53 @@ def c11_cotejo_facturas(lineas, facturas) -> ResultadoControl:
                             % factura.numero))
             continue
 
-        if factura.nit != linea.nit:
+        # --- NIT -----------------------------------------------------------
+        if not factura.nit:
+            sin_nit += 1
+            excepciones.append(Excepcion(
+                severidad=Severidad.AVISO, control="C11",
+                descripcion="%s: no se pudo leer el NIT del proveedor en el "
+                            "PDF; ese campo queda a cotejo manual"
+                            % factura.numero))
+        elif factura.nit != linea.nit:
             excepciones.append(Excepcion(
                 severidad=Severidad.HALLAZGO, control="C11",
                 descripcion="%s: NIT en el PDF %s vs auxiliar %s"
                             % (factura.numero, factura.nit, linea.nit)))
 
+        # --- base contra retencion contabilizada -----------------------------
+        tarifa = municipio.tarifa_por_cuenta.get(linea.cuenta)
+        if factura.base is None:
+            sin_base += 1
+            excepciones.append(Excepcion(
+                severidad=Severidad.AVISO, control="C11",
+                descripcion="%s: no se pudo leer la base gravable en el PDF; "
+                            "la retencion contabilizada no se pudo verificar "
+                            "contra el documento fuente" % factura.numero))
+        elif tarifa is None:
+            excepciones.append(Excepcion(
+                severidad=Severidad.AVISO, control="C11",
+                descripcion="%s: la cuenta %s no tiene tarifa parametrizada; "
+                            "no se puede recalcular la retencion"
+                            % (factura.numero, linea.cuenta),
+                renglon=linea.cuenta))
+        else:
+            esperada = (factura.base * tarifa).quantize(
+                Decimal("1"), rounding=ROUND_HALF_UP)
+            diferencia = esperada - linea.retencion
+            if abs(diferencia) > _RECALCULO:
+                excepciones.append(Excepcion(
+                    severidad=Severidad.HALLAZGO, control="C11",
+                    descripcion="%s: base %s del PDF x %s = %s, pero el "
+                                "auxiliar contabiliza %s"
+                                % (factura.numero, factura.base, tarifa,
+                                   esperada, linea.retencion),
+                    renglon=linea.cuenta,
+                    impacto_pesos=abs(diferencia)))
+            else:
+                con_base_verificada += 1
+
+        # --- fecha -----------------------------------------------------------
         if factura.fecha and factura.fecha != linea.fecha_documento:
             excepciones.append(Excepcion(
                 severidad=Severidad.OBSERVACION, control="C11",
@@ -377,8 +429,24 @@ def c11_cotejo_facturas(lineas, facturas) -> ResultadoControl:
                                linea.fecha_documento),
                 renglon=linea.cuenta))
 
-    return _resolver("C11", nombre, excepciones,
-                     "%d factura(s) cotejadas" % len(facturas))
+    # M8: el detalle dice QUE se coteja y QUE quedo sin cotejar. Decir
+    # "N facturas cotejadas" a secas sobreafirma el alcance del control.
+    # No se usa _resolver porque este descarta el detalle cuando hay
+    # excepciones, y la cobertura hay que declararla sobre todo cuando el
+    # control falla.
+    detalle = ("%d factura(s): %d con la base verificada contra la retencion "
+               "del auxiliar" % (len(facturas), con_base_verificada))
+    if sin_base:
+        detalle += "; %d sin base legible" % sin_base
+    if sin_nit:
+        detalle += "; %d sin NIT legible" % sin_nit
+    if excepciones:
+        detalle += "; %d excepcion(es)" % len(excepciones)
+
+    return ResultadoControl(
+        codigo="C11", nombre=nombre,
+        estado=Estado.FALLA if excepciones else Estado.OK,
+        detalle=detalle, excepciones=tuple(excepciones))
 
 
 def c12_continuidad(saldo_mes_anterior, pago_mes_anterior) -> ResultadoControl:

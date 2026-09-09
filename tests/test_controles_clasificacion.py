@@ -61,19 +61,19 @@ def test_c8_no_dispara_porque_el_auxiliar_esta_todo_en_julio(lineas):
 
 
 def test_c11_coteja_las_facturas_legibles(lineas, facturas):
-    r = c11_cotejo_facturas(lineas, facturas)
+    r = c11_cotejo_facturas(lineas, facturas, MUNICIPIO)
     assert any("FE338057" in e.descripcion for e in r.excepciones)
 
 
 def test_c11_detecta_el_desfase_documental_de_fe10(lineas, facturas):
     """Factura del 26/06 registrada con fecha de documento 01/07."""
-    r = c11_cotejo_facturas(lineas, facturas)
+    r = c11_cotejo_facturas(lineas, facturas, MUNICIPIO)
     assert any("FE10" in e.descripcion and "fecha" in e.descripcion.lower()
                for e in r.excepciones)
 
 
 def test_c11_sin_facturas_es_no_ejecutado(lineas):
-    assert c11_cotejo_facturas(lineas, []).estado is Estado.NO_EJECUTADO
+    assert c11_cotejo_facturas(lineas, [], MUNICIPIO).estado is Estado.NO_EJECUTADO
 
 
 def test_c12_sin_pago_anterior_es_no_ejecutado():

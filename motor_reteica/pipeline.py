@@ -187,7 +187,7 @@ def revisar(carpeta, nit, periodo, municipio) -> ContextoRevision:
         controles.c8_corte(lineas, periodo),
         controles.c9_reconstruccion_vs_borrador(recon, borrador),
         controles.c10_redondeo(borrador, recon),
-        controles.c11_cotejo_facturas(lineas, facturas),
+        controles.c11_cotejo_facturas(lineas, facturas, municipio),
         controles.c12_continuidad(None, None),
         controles.c13_formales(borrador, municipio, presentes),
         controles.c14_compras_vs_servicios(recon, municipio),
