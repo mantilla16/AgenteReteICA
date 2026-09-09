@@ -24,6 +24,8 @@ from motor_reteica.identidad import (IdentidadIncompatible, huella,
 from motor_reteica.ingesta.auxiliar import leer_auxiliar
 from motor_reteica.ingesta.balance import leer_balance
 from motor_reteica.ingesta.borrador_pdf import leer_borrador
+from motor_reteica.ingesta.formato_historico import (leer_formato_historico,
+                                                     periodo_anterior)
 from motor_reteica.ingesta.facturas_pdf import leer_factura
 from motor_reteica.ingesta.sap_retenciones import leer_sap_retenciones
 from motor_reteica.manifiesto import NOMBRE_ARCHIVO, leer_manifiesto
@@ -36,7 +38,8 @@ ARCHIVOS = {
     "erp": "sap_retenciones.xlsx",
 }
 
-_ROLES_ARCHIVO_UNICO = ("borrador", "auxiliar", "balance", "erp", "pago_anterior")
+_ROLES_ARCHIVO_UNICO = ("borrador", "auxiliar", "balance", "erp",
+                        "pago_anterior", "formato_historico")
 _ROLES_CON_FIRMA_TABULAR = ("auxiliar", "balance", "erp")
 
 
@@ -209,6 +212,16 @@ def revisar(carpeta, nit, periodo, municipio) -> ContextoRevision:
     saldos = leer_balance(rutas["balance"]) if "balance" in presentes else None
     filas_erp = leer_sap_retenciones(rutas["erp"]) if "erp" in presentes else None
 
+    # C15 y la mitad legible de C12. El formato historico del cliente trae una
+    # hoja por periodo con lo que declaro cada mes.
+    historico = (leer_formato_historico(rutas["formato_historico"])
+                 if "formato_historico" in presentes else {})
+    anterior = historico.get(periodo_anterior(periodo))
+    saldo_anterior = anterior.retenciones_declaradas if anterior else None
+    # El PAGO no esta en el formato historico: exige el comprobante, que el
+    # cliente no entrega. Sin el, C12 es NO EJECUTADO -- nunca OK.
+    pago_anterior = None
+
     facturas = [leer_factura(p, nit_cliente=nit) for p in rutas_facturas]
     if facturas:
         presentes.add("facturas")
@@ -231,9 +244,10 @@ def revisar(carpeta, nit, periodo, municipio) -> ContextoRevision:
         controles.c9_reconstruccion_vs_borrador(recon, borrador, mapa),
         controles.c10_redondeo(borrador, recon),
         controles.c11_cotejo_facturas(lineas, facturas, municipio),
-        controles.c12_continuidad(None, None),
+        controles.c12_continuidad(saldo_anterior, pago_anterior),
         controles.c13_formales(borrador, municipio, presentes),
         controles.c14_compras_vs_servicios(recon, municipio),
+        controles.c15_formato_historico(borrador, historico, periodo),
     ]
 
     return ContextoRevision(

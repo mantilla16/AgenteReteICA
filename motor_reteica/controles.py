@@ -701,3 +701,49 @@ def c9_reconstruccion_vs_borrador(reconstruccion, borrador,
         codigo="C9", nombre=nombre,
         estado=Estado.FALLA if excepciones else Estado.OK,
         detalle=detalle, excepciones=tuple(excepciones))
+
+
+def c15_formato_historico(borrador, historico, periodo) -> ResultadoControl:
+    """C15: el borrador contra el registro historico del propio cliente.
+
+    Se separo de C12 a proposito. C12 verifica el PAGO del mes anterior y sin
+    el comprobante no se puede ejecutar; si las dos cosas vivieran en un mismo
+    control, la parte ejecutable pondria el control en OK y taparia que el
+    pago nunca se miro. Un control no puede lavar a otro.
+
+    Que prueba: que el borrador que nos entregaron coincida con lo que la
+    compania registro en su propio formato para ese mismo periodo. Si difieren,
+    hay dos versiones de la declaracion y eso es hallazgo antes de mirar la
+    contabilidad.
+    """
+    nombre = "Borrador vs formato historico del cliente"
+    if not historico:
+        return _no_ejecutado("C15", nombre, "el formato historico del cliente")
+
+    del_periodo = historico.get(periodo)
+    if del_periodo is None:
+        return ResultadoControl(
+            codigo="C15", nombre=nombre, estado=Estado.NO_EJECUTADO,
+            detalle="no se ejecuto: el formato historico no trae hoja para %s "
+                    "(trae %s)" % (periodo, ", ".join(sorted(historico))))
+
+    excepciones = []
+    comparaciones = (
+        ("base gravable", del_periodo.base_declarada, borrador.renglones["23"]),
+        ("valor de retenciones", del_periodo.retenciones_declaradas,
+         borrador.renglones["24"]),
+    )
+    for etiqueta, en_formato, en_borrador in comparaciones:
+        if en_formato != en_borrador:
+            excepciones.append(Excepcion(
+                severidad=Severidad.HALLAZGO, control="C15",
+                descripcion="%s: el formato historico (hoja %r) dice %s y el "
+                            "borrador dice %s"
+                            % (etiqueta, del_periodo.hoja, en_formato,
+                               en_borrador),
+                impacto_pesos=abs(en_formato - en_borrador)))
+
+    return _resolver(
+        "C15", nombre, excepciones,
+        "el borrador coincide con la hoja %r del formato del cliente en base "
+        "y retenciones" % del_periodo.hoja)
