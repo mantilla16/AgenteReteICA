@@ -101,6 +101,13 @@ def test_las_excepciones_salen_ordenadas_por_severidad(libro):
     assert "OBSERVACION" in texto or "AVISO" in texto
 
 
+def test_excepciones_declara_el_tipo_de_referencia(libro):
+    """M13: la columna RENGLON ya no es ambigua sin decir de que tipo es."""
+    texto = _texto(libro["Excepciones"])
+    assert "TIPO DE REF." in texto.upper()
+    assert "Renglon" in texto or "Cuenta" in texto or "NIT" in texto
+
+
 def test_parametros_declara_que_no_hubo_manifiesto_para_esta_corrida(libro):
     """1.4.b: la fixture corre en modo legado (sin manifiesto.json)."""
     texto = _texto(libro["Parametros"])

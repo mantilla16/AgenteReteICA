@@ -22,7 +22,8 @@ Eso es PEOR que no tener el control.
 import json
 
 from motor_reteica.ia.cliente import ClienteIA
-from motor_reteica.tipos import Estado, Excepcion, ResultadoControl, Severidad
+from motor_reteica.tipos import (REF_CUENTA, Estado, Excepcion,
+                                 ResultadoControl, Severidad)
 
 VERSION_PROMPT = "1.0.0"
 
@@ -169,7 +170,7 @@ def ia1_plausibilidad(reconstruccion, borrador, municipio, cliente=None,
 
         excepciones.append(Excepcion(
             severidad=severidad, control="IA-1", descripcion=descripcion,
-            renglon=linea.cuenta,
+            renglon=linea.cuenta, tipo_referencia=REF_CUENTA,
             **({"impacto_pesos": impacto} if impacto is not None else {})))
 
     detalle = ("%d linea(s) revisadas por %s. LIMITE: esto es PLAUSIBILIDAD, no "

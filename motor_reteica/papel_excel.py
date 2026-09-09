@@ -185,17 +185,25 @@ def _hoja_cruces(libro, ctx):
             float(tercero.retencion_recalculada)])
 
 
+_ETIQUETA_TIPO_REF = {"cuenta": "Cuenta", "nit": "NIT", "renglon": "Renglon", "": ""}
+
+
 def _hoja_excepciones(libro, ctx):
     hoja = libro.create_sheet("Excepciones")
-    for letra, ancho in zip("ABCDE", (16, 10, 100, 14, 16)):
+    for letra, ancho in zip("ABCDEF", (16, 10, 100, 12, 14, 16)):
         hoja.column_dimensions[letra].width = ancho
 
-    fila = _titulo(hoja, 1, "EXCEPCIONES", ancho=5)
+    fila = _titulo(hoja, 1, "EXCEPCIONES", ancho=6)
     fila = _encabezados(hoja, fila, [
-        "SEVERIDAD", "CONTROL", "DESCRIPCION", "RENGLON", "IMPACTO $"])
+        # M13: la columna RENGLON trae una cuenta contable, un NIT o un
+        # renglon real del formulario segun el control. TIPO DE REF. dice
+        # cual de los tres es, para no leerla como si siempre fuera lo mismo.
+        "SEVERIDAD", "CONTROL", "DESCRIPCION", "TIPO DE REF.", "RENGLON",
+        "IMPACTO $"])
     for excepcion in ctx.informe.excepciones_ordenadas:
         fila = _fila(hoja, fila, [
             excepcion.severidad.value, excepcion.control, excepcion.descripcion,
+            _ETIQUETA_TIPO_REF.get(excepcion.tipo_referencia, excepcion.tipo_referencia),
             excepcion.renglon, float(excepcion.impacto_pesos)])
     if not ctx.informe.excepciones_ordenadas:
         fila = _fila(hoja, fila, ["Sin excepciones"])

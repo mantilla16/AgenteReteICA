@@ -27,6 +27,20 @@ class Severidad(Enum):
     AVISO = "AVISO"
 
 
+# M13: Excepcion.renglon esta sobrecargado -- distintos controles meten ahi
+# una cuenta contable (C2/C5/C8/C11/C13), un NIT (C3/C4/C9) o un renglon real
+# del formulario (C6/C7/C9). Renombrar `renglon` tocaria cada llamada, cada
+# prueba que lo lee y el encabezado de la hoja Excepciones/Notas del papel,
+# por una ganancia mayormente cosmetica. En vez de eso, `tipo_referencia`
+# etiqueta que tipo de dato es, de forma aditiva: no cambia el significado de
+# `renglon` para quien ya lo consume, solo lo hace explicito para quien
+# necesite ordenar o mostrar por tipo (la hoja Notas de 5.4, por ejemplo).
+REF_CUENTA = "cuenta"
+REF_NIT = "nit"
+REF_RENGLON = "renglon"
+REF_SIN_TIPO = ""
+
+
 @dataclass(frozen=True)
 class LineaAuxiliar:
     """Unidad atomica del motor: una linea del auxiliar, no un tercero."""
@@ -55,6 +69,9 @@ class Excepcion:
     descripcion: str
     renglon: str = ""
     impacto_pesos: Decimal = Decimal("0")
+    # M13: que TIPO de dato trae `renglon` en esta excepcion puntual. Ver
+    # nota junto a REF_CUENTA/REF_NIT/REF_RENGLON mas arriba.
+    tipo_referencia: str = REF_SIN_TIPO
 
 
 @dataclass(frozen=True)

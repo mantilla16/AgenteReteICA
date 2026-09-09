@@ -8,7 +8,8 @@ from collections import defaultdict
 from decimal import ROUND_HALF_UP, Decimal
 
 from motor_reteica.parametros.tolerancias import TOLERANCIAS
-from motor_reteica.tipos import Estado, Excepcion, ResultadoControl, Severidad
+from motor_reteica.tipos import (REF_CUENTA, REF_NIT, REF_RENGLON, Estado,
+                                 Excepcion, ResultadoControl, Severidad)
 
 _CRUCE = TOLERANCIAS["diferencia_maxima_cruce_pesos"]
 _RECALCULO = TOLERANCIAS["diferencia_maxima_recalculo_pesos"]
@@ -61,7 +62,8 @@ def c2_balance_vs_auxiliar(saldos, lineas) -> ResultadoControl:
                 descripcion="cuenta %s: balance %s vs auxiliar %s"
                             % (cuenta, saldos.get(cuenta, _CERO),
                                por_cuenta.get(cuenta, _CERO)),
-                renglon=cuenta, impacto_pesos=abs(diferencia)))
+                renglon=cuenta, tipo_referencia=REF_CUENTA,
+                impacto_pesos=abs(diferencia)))
 
     return _resolver("C2", nombre, excepciones,
                      "%d cuenta(s) cuadradas" % len(por_cuenta))
@@ -93,7 +95,8 @@ def c3_auxiliar_vs_erp(lineas, filas_erp) -> ResultadoControl:
                 severidad=Severidad.HALLAZGO, control="C3",
                 descripcion="NIT %s: auxiliar %s vs ERP %s"
                             % (nit, auxiliar.get(nit, _CERO), erp.get(nit, _CERO)),
-                renglon=nit, impacto_pesos=abs(diferencia)))
+                renglon=nit, tipo_referencia=REF_NIT,
+                impacto_pesos=abs(diferencia)))
 
     return _resolver("C3", nombre, excepciones,
                      "%d tercero(s) cuadrados" % len(auxiliar))
@@ -129,7 +132,7 @@ def c5_coherencia_cuenta_codigo(lineas, filas_erp, municipio) -> ResultadoContro
                                tarifa_cuenta, ", ".join(sorted(codigos)),
                                ", ".join(str(t) for t in sorted(
                                    t for t in tarifas_erp if t is not None))),
-                renglon=linea.cuenta))
+                renglon=linea.cuenta, tipo_referencia=REF_CUENTA))
 
     return _resolver("C5", nombre, excepciones,
                      "%d linea(s) verificadas" % len(lineas))
@@ -193,7 +196,8 @@ def c4_recalculo(reconstruccion) -> ResultadoControl:
                             % (tercero.nit, tercero.base, tercero.tarifa,
                                tercero.retencion_recalculada,
                                tercero.retencion_contable),
-                renglon=tercero.nit, impacto_pesos=abs(tercero.diferencia)))
+                renglon=tercero.nit, tipo_referencia=REF_NIT,
+                impacto_pesos=abs(tercero.diferencia)))
 
     return _resolver("C4", nombre, excepciones,
                      "%d tercero(s) recalculados sobre la base del ERP"
@@ -230,13 +234,13 @@ def c7_tarifas_vs_estatuto(borrador, municipio, atestacion=None) -> ResultadoCon
                 severidad=Severidad.HALLAZGO, control="C7",
                 descripcion="la actividad %s no figura en el estatuto de %s"
                             % (actividad.codigo, municipio.nombre),
-                renglon=actividad.codigo))
+                renglon=actividad.codigo, tipo_referencia=REF_RENGLON))
         elif vigente != actividad.tarifa:
             excepciones.append(Excepcion(
                 severidad=Severidad.HALLAZGO, control="C7",
                 descripcion="actividad %s: declarada %s, estatuto %s"
                             % (actividad.codigo, actividad.tarifa, vigente),
-                renglon=actividad.codigo,
+                renglon=actividad.codigo, tipo_referencia=REF_RENGLON,
                 impacto_pesos=abs(actividad.base * (vigente - actividad.tarifa))))
 
     return _resolver("C7", nombre, excepciones,
@@ -257,7 +261,7 @@ def _c7_contra_atestacion(borrador, atestacion, nombre) -> ResultadoControl:
                 descripcion="la actividad %s aparece en el borrador y nadie "
                             "atesto su tarifa: queda sin respaldo"
                             % actividad.codigo,
-                renglon=actividad.codigo))
+                renglon=actividad.codigo, tipo_referencia=REF_RENGLON))
         elif atestada.tarifa != actividad.tarifa:
             excepciones.append(Excepcion(
                 severidad=Severidad.HALLAZGO, control="C7",
@@ -265,7 +269,7 @@ def _c7_contra_atestacion(borrador, atestacion, nombre) -> ResultadoControl:
                             "atesto %s (%s)"
                             % (actividad.codigo, actividad.tarifa,
                                atestada.tarifa, atestada.descripcion()),
-                renglon=actividad.codigo,
+                renglon=actividad.codigo, tipo_referencia=REF_RENGLON,
                 impacto_pesos=abs(actividad.base
                                   * (atestada.tarifa - actividad.tarifa))))
 
@@ -391,7 +395,7 @@ def c6_clasificacion_por_linea(reconstruccion, facturas, mapa_actividad,
                             "esta clasificado en el renglon %s de comercio al "
                             "por mayor"
                             % (linea.referencia, linea.nit, linea.concepto, codigo),
-                renglon=codigo, impacto_pesos=_CERO))
+                renglon=codigo, tipo_referencia=REF_RENGLON, impacto_pesos=_CERO))
         # El lado que faltaba: un control asimetrico deja media poblacion sin
         # cubrir y no lo dice.
         elif naturaleza == "COMERCIO" and not es_renglon_comercio:
@@ -401,7 +405,7 @@ def c6_clasificacion_por_linea(reconstruccion, facturas, mapa_actividad,
                             "mercancia (comercio) pero esta clasificado en el "
                             "renglon %s, que no es de comercio"
                             % (linea.referencia, linea.nit, linea.concepto, codigo),
-                renglon=codigo, impacto_pesos=_CERO))
+                renglon=codigo, tipo_referencia=REF_RENGLON, impacto_pesos=_CERO))
         elif naturaleza == AMBIGUO:
             excepciones.append(Excepcion(
                 severidad=Severidad.AVISO, control="C6",
@@ -409,14 +413,14 @@ def c6_clasificacion_por_linea(reconstruccion, facturas, mapa_actividad,
                             "compra y servicio a la vez -- y no se puede "
                             "clasificar sin criterio humano"
                             % (linea.referencia, linea.nit, linea.concepto),
-                renglon=codigo))
+                renglon=codigo, tipo_referencia=REF_RENGLON))
         elif naturaleza == DESCONOCIDO:
             excepciones.append(Excepcion(
                 severidad=Severidad.AVISO, control="C6",
                 descripcion="%s (NIT %s): el concepto [%s] no se pudo clasificar "
                             "como compra ni como servicio; queda sin cubrir"
                             % (linea.referencia, linea.nit, linea.concepto),
-                renglon=codigo))
+                renglon=codigo, tipo_referencia=REF_RENGLON))
 
     for nit, factura in sorted(por_nit.items()):
         declarada = _renglon_de(nit)
@@ -437,7 +441,7 @@ def c6_clasificacion_por_linea(reconstruccion, facturas, mapa_actividad,
             descripcion="%s (NIT %s): el proveedor declara la actividad %s en "
                         "su factura pero el borrador la clasifica en %s"
                         % (factura.numero, nit, en_factura, declarada),
-            renglon=declarada, impacto_pesos=impacto))
+            renglon=declarada, tipo_referencia=REF_RENGLON, impacto_pesos=impacto))
 
     return _resolver("C6", nombre, excepciones,
                      "%d linea(s) clasificadas sin contradiccion"
@@ -466,7 +470,8 @@ def c8_corte(lineas, periodo) -> ResultadoControl:
                 severidad=Severidad.HALLAZGO, control="C8",
                 descripcion="%s: contabilizada el %s, fuera del periodo %s"
                             % (linea.referencia, contabilizacion, periodo),
-                renglon=linea.cuenta, impacto_pesos=linea.retencion))
+                renglon=linea.cuenta, tipo_referencia=REF_CUENTA,
+                impacto_pesos=linea.retencion))
         elif (linea.fecha_documento.year,
               linea.fecha_documento.month) != (anio, mes):
             excepciones.append(Excepcion(
@@ -475,7 +480,7 @@ def c8_corte(lineas, periodo) -> ResultadoControl:
                             "a %s; valida si la retencion se causo en el abono "
                             "en cuenta, pero debe quedar escrito"
                             % (linea.referencia, linea.fecha_documento, periodo),
-                renglon=linea.cuenta))
+                renglon=linea.cuenta, tipo_referencia=REF_CUENTA))
 
     return _resolver("C8", nombre, excepciones,
                      "%d linea(s) contabilizadas dentro del periodo %s"
@@ -546,7 +551,7 @@ def c11_cotejo_facturas(lineas, facturas, municipio) -> ResultadoControl:
                 descripcion="%s: la cuenta %s no tiene tarifa parametrizada; "
                             "no se puede recalcular la retencion"
                             % (factura.numero, linea.cuenta),
-                renglon=linea.cuenta))
+                renglon=linea.cuenta, tipo_referencia=REF_CUENTA))
         else:
             esperada = (factura.base * tarifa).quantize(
                 Decimal("1"), rounding=ROUND_HALF_UP)
@@ -558,7 +563,7 @@ def c11_cotejo_facturas(lineas, facturas, municipio) -> ResultadoControl:
                                 "auxiliar contabiliza %s"
                                 % (factura.numero, factura.base, tarifa,
                                    esperada, linea.retencion),
-                    renglon=linea.cuenta,
+                    renglon=linea.cuenta, tipo_referencia=REF_CUENTA,
                     impacto_pesos=abs(diferencia)))
             else:
                 con_base_verificada += 1
@@ -571,7 +576,7 @@ def c11_cotejo_facturas(lineas, facturas, municipio) -> ResultadoControl:
                             "registra con fecha de documento %s"
                             % (factura.numero, factura.fecha,
                                linea.fecha_documento),
-                renglon=linea.cuenta))
+                renglon=linea.cuenta, tipo_referencia=REF_CUENTA))
 
     # M8: el detalle dice QUE se coteja y QUE quedo sin cotejar. Decir
     # "N facturas cotejadas" a secas sobreafirma el alcance del control.
@@ -632,7 +637,7 @@ def c13_formales(borrador, municipio, insumos_obtenidos,
                         "contrapartida de pago (excluida de los cruces) por su "
                         "saldo, no por declaracion del auditor; conviene "
                         "atestarla" % cuenta,
-            renglon=cuenta))
+            renglon=cuenta, tipo_referencia=REF_CUENTA))
 
     # M10: se quito el chequeo de firma de revisor fiscal. El objeto de prueba
     # es un BORRADOR que la firma todavia no ha firmado, asi que verificar ahi
@@ -715,7 +720,7 @@ def c9_reconstruccion_vs_borrador(reconstruccion, borrador,
                             % (grupo.nit, grupo.tarifa,
                                ", ".join(str(t) for t in sorted(
                                    clases_declaradas))),
-                renglon=grupo.nit,
+                renglon=grupo.nit, tipo_referencia=REF_NIT,
                 impacto_pesos=grupo.retencion_contable))
         else:
             sin_asignar.append(grupo)
@@ -729,7 +734,7 @@ def c9_reconstruccion_vs_borrador(reconstruccion, borrador,
                         "esa tarifa y ninguno cuadra con su base; el reparto "
                         "de este tercero no se pudo reproducir"
                         % (grupo.nit, grupo.tarifa),
-            renglon=grupo.nit))
+            renglon=grupo.nit, tipo_referencia=REF_NIT))
 
     # ---- montos por renglon --------------------------------------------------
     for codigo in sorted(set(declarado) | set(reconstruido)):
@@ -741,7 +746,8 @@ def c9_reconstruccion_vs_borrador(reconstruccion, borrador,
                 severidad=Severidad.HALLAZGO, control="C9",
                 descripcion="la actividad %s aparece en el borrador pero no en "
                             "la reconstruccion" % codigo,
-                renglon=codigo, impacto_pesos=actividad.impuesto))
+                renglon=codigo, tipo_referencia=REF_RENGLON,
+                impacto_pesos=actividad.impuesto))
             continue
 
         if actividad is None:
@@ -749,7 +755,8 @@ def c9_reconstruccion_vs_borrador(reconstruccion, borrador,
                 severidad=Severidad.HALLAZGO, control="C9",
                 descripcion="la actividad %s se reconstruyo pero no aparece en "
                             "el borrador" % codigo,
-                renglon=codigo, impacto_pesos=renglon.impuesto_declarable))
+                renglon=codigo, tipo_referencia=REF_RENGLON,
+                impacto_pesos=renglon.impuesto_declarable))
             continue
 
         if renglon.base_declarable != actividad.base:
@@ -757,7 +764,7 @@ def c9_reconstruccion_vs_borrador(reconstruccion, borrador,
                 severidad=Severidad.HALLAZGO, control="C9",
                 descripcion="actividad %s: base de auditoria %s vs declarada %s"
                             % (codigo, renglon.base_declarable, actividad.base),
-                renglon=codigo,
+                renglon=codigo, tipo_referencia=REF_RENGLON,
                 impacto_pesos=abs(renglon.base_declarable - actividad.base)))
 
         if renglon.impuesto_declarable != actividad.impuesto:
@@ -767,7 +774,7 @@ def c9_reconstruccion_vs_borrador(reconstruccion, borrador,
                             "declarado %s"
                             % (codigo, renglon.impuesto_declarable,
                                actividad.impuesto),
-                renglon=codigo,
+                renglon=codigo, tipo_referencia=REF_RENGLON,
                 impacto_pesos=abs(renglon.impuesto_declarable
                                   - actividad.impuesto)))
 

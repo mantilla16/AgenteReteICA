@@ -31,6 +31,24 @@ def test_c1_no_usa_la_formula_impresa_27_mas_28_mas_29(borrador):
     assert c1_formulario_cuadra(borrador, MUNICIPIO).estado is Estado.OK
 
 
+def test_c1_cierra_el_riesgo_m12_de_una_actividad_truncada_por_desborde_de_pagina(borrador):
+    """M12: leer_borrador solo lee pdf.pages[0]. Si algun mes el cuadro C
+    desbordara a una pagina real que el parser no lee, la actividad faltante
+    NO pasaria en silencio: la suma de impuestos por actividad dejaria de
+    cuadrar contra el renglon 24, y C1 lo cazaria ANTES de mirar la
+    contabilidad, con el impacto en pesos de lo que se perdio.
+
+    No se fabrica un PDF de dos paginas -- nunca se ha visto uno real -- se
+    prueba la red de seguridad que ya existe quitando una actividad del
+    borrador ya parseado, que es el efecto equivalente de una que el parser
+    jamas hubiera leido."""
+    faltan_una = replace(borrador, actividades=borrador.actividades[:-1])
+    r = c1_formulario_cuadra(faltan_una, MUNICIPIO)
+    assert r.estado is Estado.FALLA
+    excepcion = next(e for e in r.excepciones if "renglon 24" in e.descripcion)
+    assert excepcion.impacto_pesos == borrador.actividades[-1].impuesto
+
+
 def test_c4_absorbe_el_peso_de_redondeo_del_erp(recon):
     assert c4_recalculo(recon).estado is Estado.OK
 

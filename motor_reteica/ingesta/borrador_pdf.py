@@ -14,6 +14,18 @@ Trampas del formulario de Santa Marta, verificadas contra el PDF real:
   - El formulario imprime en el renglon 31 la formula '(renglon 27+28+29)',
     que NO se cumple: el 28 reexpresa el 27, no lo suma. C1 debe verificar
     31 = 27 + 29 + 30.
+
+M12 -- RIESGO NO ELIMINADO, PERO CON RED DE SEGURIDAD: si algun mes el cuadro
+C tuviera mas actividades de las que caben en una pagina y se desbordara a una
+pagina REAL de continuacion (distinta de las 3 copias identicas ya conocidas),
+`pdf.pages[0]` no la leeria y esas actividades se perderian en silencio... si
+nada mas las verificara. Pero C1 ya suma el impuesto y la base de
+`borrador.actividades` y los compara contra los renglones 23/24 del propio
+PDF: una actividad truncada hace que esa suma deje de cuadrar, y C1 falla con
+el impacto en pesos de lo que falto, ANTES de tocar la contabilidad. No se
+escribio codigo de paginacion especulativo para un layout que nunca se ha
+visto: se verifico (test_c1_cierra_el_riesgo_m12...) que la red de seguridad
+que ya existia de verdad ataja este caso.
 """
 
 import re
