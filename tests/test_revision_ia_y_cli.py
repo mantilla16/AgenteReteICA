@@ -54,7 +54,11 @@ def test_el_cli_corre_extremo_a_extremo(tmp_path, capsys):
     codigo = cli.main(["--carpeta", str(BASE), "--nit", "819002433",
                        "--periodo", "2026-07", "--salida", str(salida)])
     impreso = capsys.readouterr().out
-    assert codigo == 0
+    # M6: antes esperaba 0 y esa era justamente la mentira. La corrida imprime
+    # "Conclusion limpia: NO" -- con C7 y C12 sin ejecutar -- asi que el codigo
+    # de salida tiene que decir lo mismo: 3, no concluyente.
+    assert codigo == cli.NO_CONCLUYENTE
+    assert codigo != 0, "un exit 0 contradiria la conclusion impresa"
     assert salida.exists()
     assert "474561" in impreso
     assert "Conclusion limpia: NO" in impreso

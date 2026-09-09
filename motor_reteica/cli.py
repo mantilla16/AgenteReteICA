@@ -13,6 +13,29 @@ MUNICIPIOS = {"santa_marta": MUNICIPIO}
 
 _SIMBOLO = {Estado.OK: "OK ", Estado.FALLA: "!! ", Estado.NO_EJECUTADO: "-- "}
 
+# M6: el codigo de salida refleja la CONCLUSION, no solo el impacto en pesos.
+# Antes era `0 if impacto_total == 0 else 1`, y devolvia exito en la corrida de
+# julio 2026 -- con C7 y C12 sin ejecutar y la conclusion diciendo que la
+# revision no era concluyente.
+LIMPIO = 0
+CON_EXCEPCIONES = 1
+INSUMO_FALTANTE = 2
+NO_CONCLUYENTE = 3
+
+
+def _codigo_de_salida(informe) -> int:
+    """Traduce el estado de la revision a un codigo para automatizacion.
+
+    NO_CONCLUYENTE pesa mas que CON_EXCEPCIONES: una excepcion encontrada es
+    un resultado; un control sin ejecutar es la AUSENCIA de resultado, y eso
+    es lo que impide concluir.
+    """
+    if informe.controles_no_ejecutados:
+        return NO_CONCLUYENTE
+    if informe.controles_en_falla:
+        return CON_EXCEPCIONES
+    return LIMPIO if informe.puede_concluir_limpio else CON_EXCEPCIONES
+
 
 def _tablero(ctx) -> None:
     print("\nREVISION DE RETEICA - NIT %s - periodo %s - %s"
@@ -65,7 +88,7 @@ def main(argv=None) -> int:
     _tablero(ctx)
     ruta = generar_papel(args.salida, ctx)
     print("\nPapel de trabajo generado en %s" % ruta)
-    return 0 if ctx.informe.impacto_total == 0 else 1
+    return _codigo_de_salida(ctx.informe)
 
 
 if __name__ == "__main__":
