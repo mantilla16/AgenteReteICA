@@ -1,3 +1,5 @@
+import json
+import shutil
 from pathlib import Path
 
 import openpyxl
@@ -99,6 +101,32 @@ def test_el_papel_declara_la_limitacion_de_integridad(libro):
 def test_las_excepciones_salen_ordenadas_por_severidad(libro):
     texto = _texto(libro["Excepciones"])
     assert "OBSERVACION" in texto or "AVISO" in texto
+
+
+def test_generar_papel_no_revienta_con_un_control_atestado(tmp_path):
+    """Bug real encontrado al construir la API web: _RELLENO_ESTADO no tenia
+    entrada para Estado.ATESTADO y hoja_controles reventaba con KeyError la
+    primera vez que alguien atestara una tarifa -- nunca se habia ejercitado
+    porque nadie ha atestado en ninguna corrida real todavia."""
+    destino = tmp_path / "con_atestacion"
+    shutil.copytree(BASE, destino)
+    tarifas = [{"municipio": "Santa Marta", "actividad": c, "tarifa": t,
+               "vigencia_desde": "2026-01-01", "acuerdo": "Acuerdo 013 de 2024",
+               "articulo": "52"}
+              for c, t in {"9609": "0.007", "7490": "0.007", "4669": "0.010",
+                          "5224": "0.010", "9903": "0.010"}.items()]
+    (destino / "atestacion.json").write_text(json.dumps({
+        "declarada_por": "analitica@rbcol.co", "fecha": "2026-09-09",
+        "tarifas": tarifas, "cuentas": []}, ensure_ascii=False), encoding="utf-8")
+
+    ctx = revisar(destino, nit="819002433", periodo="2026-07", municipio=MUNICIPIO)
+    c7 = next(r for r in ctx.resultados if r.codigo == "C7")
+    assert c7.estado.value == "ATESTADO"
+
+    salida = generar_papel(destino / "papel.xlsx", ctx)  # no debe lanzar KeyError
+    texto = " ".join(str(c.value) for fila in openpyxl.load_workbook(salida)["Controles"]
+                     .iter_rows() for c in fila if c.value is not None)
+    assert "ATESTADO" in texto
 
 
 def test_excepciones_declara_el_tipo_de_referencia(libro):

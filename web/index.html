@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Motor de Revision de ReteICA</title>
+<style>
+/* ---------------------------------------------------------------
+   SISTEMA DE DISEÑO — Russell Bedford, adaptado del proyecto
+   "analitica-puc" (Tailwind+React) a CSS plano para una pagina unica
+   servida por FastAPI sin paso de build.
+
+   Dos familias de color: MARCA (navy/cian/morado/naranja) viste la
+   interfaz; ESTADO (verde/rojo/ambar/lila) conserva el codigo del
+   oficio -- un control NO_EJECUTADO no puede salir en morado
+   corporativo porque quede bonito. LILA es propio de este proyecto:
+   el estado ATESTADO (X1) no es ni OK ni NO_EJECUTADO.
+
+   Montserrat para el texto; JetBrains Mono para las CIFRAS -- sin
+   tipografia tabular las columnas de saldos no alinean digito con
+   digito y una cedula de cifras se vuelve ilegible.
+   --------------------------------------------------------------- */
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+:root {
+  --papel:        #eef1f7;
+  --papel-hondo:  #e3e7f2;
+  --papel-alto:   #ffffff;
+  --tinta:        #14143a;
+  --tinta-media:  #4a4a70;
+  --tinta-suave:  #85859f;
+  --regla:        #dcdfeb;
+  --regla-fina:   #ecEEF6;
+
+  --marca:        #1b1a5e;
+  --marca-vivo:   #302e8f;
+  --marca-tenue:  #e8e8f4;
+  --cian:         #00bce4;
+  --cian-hondo:   #0093b3;
+  --cian-tenue:   #e2f7fc;
+  --morado:       #92278f;
+  --naranja:      #ef8a00;
+
+  --verde:        #0d7a57;
+  --verde-vivo:   #10a473;
+  --verde-tenue:  #ddf3ea;
+  --rojo:         #c0392b;
+  --rojo-tenue:   #fdeae7;
+  --ambar:        #b56a00;
+  --ambar-tenue:  #fdf0da;
+  --lila:         #5b4fa0;
+  --lila-tenue:   #e9e6f7;
+
+  --sombra-baja:  0 1px 2px rgb(15 30 40 / .05), 0 1px 3px rgb(15 30 40 / .04);
+  --sombra-media: 0 2px 4px rgb(15 30 40 / .05), 0 6px 16px rgb(15 30 40 / .07);
+  --radio: 12px;
+  --radio-chico: 8px;
+  --font-sans: "Montserrat", ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "IBM Plex Mono", monospace;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0; font-family: var(--font-sans); color: var(--tinta);
+  background:
+    radial-gradient(1200px 600px at 50% -10%, #f8fafd 0%, transparent 70%),
+    var(--papel);
+  background-attachment: fixed;
+  -webkit-font-smoothing: antialiased;
+}
+h1, h2 { letter-spacing: -0.02em; margin: 0; }
+
+.cifra { font-family: var(--font-mono); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.rotulo { font-size: .6875rem; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--tinta-suave); }
+
+.cinta-marca { height: 3px; background: linear-gradient(90deg, var(--cian) 0%, var(--naranja) 33%, var(--morado) 66%, var(--cian) 100%); }
+
+header { position: sticky; top: 3px; z-index: 20; border-bottom: 1px solid var(--regla);
+         background: rgba(255,255,255,.85); backdrop-filter: blur(6px); }
+.cab { max-width: 980px; margin: 0 auto; padding: 12px 24px; display: flex; align-items: center; gap: 12px; }
+.marca-linea { display: flex; align-items: center; gap: 10px; }
+.marca-linea b { font-size: .95rem; font-weight: 700; }
+.marca-linea .rotulo { display: none; }
+@media (min-width: 560px) { .marca-linea .rotulo { display: inline; } }
+
+main { max-width: 980px; margin: 0 auto; padding: 24px 20px 60px; }
+
+.panel { background: var(--papel-alto); border: 1px solid var(--regla); border-radius: var(--radio);
+         box-shadow: var(--sombra-baja); padding: 22px; margin-bottom: 20px; }
+.panel-punteado { border: 2px dashed var(--cian-hondo); border-radius: var(--radio); background: transparent;
+                  padding: 30px; text-align: center; color: var(--tinta-media); cursor: pointer; transition: .15s; }
+.panel-punteado.hover { background: var(--cian-tenue); border-color: var(--marca); }
+
+section.seccion { margin-top: 34px; }
+.seccion-cab { margin-bottom: 12px; display: flex; align-items: baseline; gap: 10px; border-bottom: 1px solid var(--regla); padding-bottom: 8px; }
+.seccion-cab .n { font-family: var(--font-mono); font-size: .75rem; color: var(--tinta-suave); }
+.seccion-cab h2 { font-size: 1.05rem; font-weight: 600; }
+
+.files { margin-top: 12px; font-size: 13px; }
+.files span { display: inline-block; background: var(--cian-tenue); border: 1px solid var(--regla);
+              border-radius: 6px; padding: 4px 10px; margin: 3px; color: var(--tinta-media); }
+
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; }
+label { display: block; font-size: 12px; font-weight: 600; color: var(--tinta-media); margin-bottom: 4px; }
+input, select {
+  width: 100%; padding: 9px 11px; border-radius: var(--radio-chico); border: 1px solid var(--regla);
+  background: var(--papel-alto); font-family: var(--font-sans); font-size: 14px; transition: .15s;
+}
+input:focus, select:focus { outline: none; border-color: var(--cian); box-shadow: 0 0 0 3px rgb(0 188 228 / .22); }
+
+.btn { display: inline-flex; align-items: center; gap: .5rem; border-radius: var(--radio-chico);
+       padding: .6rem 1.2rem; font-size: .9rem; font-weight: 600; letter-spacing: .01em;
+       border: 0; cursor: pointer; font-family: var(--font-sans); transition: .15s; }
+.btn-principal { background: var(--marca); color: #fff; box-shadow: var(--sombra-baja); }
+.btn-principal:hover:not(:disabled) { background: var(--marca-vivo); box-shadow: var(--sombra-media); }
+.btn-contorno { background: var(--papel-alto); border: 1px solid var(--regla); color: var(--tinta); }
+.btn-contorno:hover { border-color: var(--cian); color: var(--cian-hondo); }
+.btn:disabled { opacity: .45; cursor: default; }
+
+.chip { display: inline-flex; align-items: center; gap: .3rem; border-radius: 999px; padding: .15rem .65rem;
+        font-size: .6875rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.chip-verde  { background: var(--verde-tenue); color: var(--verde); }
+.chip-rojo   { background: var(--rojo-tenue);  color: var(--rojo); }
+.chip-ambar  { background: var(--ambar-tenue); color: var(--ambar); }
+.chip-lila   { background: var(--lila-tenue);  color: var(--lila); }
+.chip-gris   { background: var(--papel-hondo); color: var(--tinta-media); }
+
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 14px; }
+.kpi { background: var(--papel-hondo); border: 1px solid var(--regla); border-radius: var(--radio-chico); padding: 14px; }
+.kpi .v { font-size: 1.15rem; font-weight: 700; color: var(--marca); }
+.kpi .l { font-size: 11px; color: var(--tinta-suave); text-transform: uppercase; margin-top: 3px; }
+
+.aviso { display: flex; gap: 12px; border-radius: 12px; border-left: 4px solid; padding: 14px 16px; font-size: 14px; }
+.aviso.ok    { border-color: var(--verde); background: var(--verde-tenue); color: var(--verde); }
+.aviso.error { border-color: var(--rojo);  background: var(--rojo-tenue);  color: var(--rojo); }
+.aviso.alerta{ border-color: var(--ambar); background: var(--ambar-tenue); color: var(--ambar); }
+.aviso .cuerpo { color: var(--tinta-media); font-weight: 400; }
+.aviso b { color: inherit; }
+
+.control { display: flex; gap: 12px; border-bottom: 1px solid var(--regla-fina); padding: 12px 0; }
+.control:last-child { border-bottom: none; }
+.control .marca-check { width: 22px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+.control .cuerpo { min-width: 0; flex: 1; }
+.control .titulo { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: .875rem; font-weight: 600; }
+.control .titulo .cod { font-family: var(--font-mono); font-size: .75rem; color: var(--tinta-suave); }
+.control .detalle { margin-top: 3px; font-size: .78rem; line-height: 1.5; color: var(--tinta-media); }
+
+@keyframes puntear { from { stroke-dashoffset: 24; } to { stroke-dashoffset: 0; } }
+.punteo path { stroke-dasharray: 24; animation: puntear .4s ease-out forwards; }
+
+table.tabla { width: 100%; border-collapse: collapse; font-size: 13px; }
+.tabla thead tr { background: var(--papel-hondo); }
+.tabla th, .tabla td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--regla); }
+.tabla th { color: var(--tinta-media); font-size: 11px; text-transform: uppercase; font-weight: 600; }
+.tabla tbody tr:hover { background: var(--papel-hondo); }
+.sev-HALLAZGO { color: var(--rojo); font-weight: 700; }
+.sev-OBSERVACION { color: var(--ambar); font-weight: 600; }
+.sev-AVISO { color: var(--tinta-suave); }
+
+.concl { font-size: 14px; line-height: 1.65; color: var(--tinta-media); }
+.hidden { display: none; }
+.foot { font-size: 12px; color: var(--tinta-suave); text-align: center; margin: 30px 0 10px; }
+a.dl { display: inline-block; margin-top: 10px; text-decoration: none; }
+
+@media print {
+  .no-imprimir, header, .cinta-marca { display: none !important; }
+  body { background: #fff; }
+  .panel { box-shadow: none; border-color: #999; break-inside: avoid; }
+  section { break-inside: avoid-page; }
+  table { break-inside: auto; } tr { break-inside: avoid; }
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
+</style>
+</head>
+<body>
+<div class="cinta-marca"></div>
+<header>
+  <div class="cab">
+    <div class="marca-linea">
+      <svg viewBox="0 0 240 240" width="26" height="26" fill="none" aria-hidden="true">
+        <g transform="rotate(-90 120 120)">
+          <circle cx="120" cy="120" r="100" stroke="#00bce4" stroke-width="18" stroke-linecap="round" stroke-dasharray="149 628" stroke-dashoffset="0"/>
+          <circle cx="120" cy="120" r="100" stroke="#ef8a00" stroke-width="18" stroke-linecap="round" stroke-dasharray="149 628" stroke-dashoffset="-157"/>
+          <circle cx="120" cy="120" r="100" stroke="#00bce4" stroke-width="18" stroke-linecap="round" stroke-dasharray="149 628" stroke-dashoffset="-314"/>
+          <circle cx="120" cy="120" r="100" stroke="#92278f" stroke-width="18" stroke-linecap="round" stroke-dasharray="149 628" stroke-dashoffset="-471"/>
+        </g>
+      </svg>
+      <b>Russell Bedford</b>
+      <span class="rotulo">Motor de Revision · ReteICA</span>
+    </div>
+    <div style="margin-left:auto">
+      <button id="cerrar" class="btn btn-contorno" title="Cierra la aplicacion">Cerrar</button>
+    </div>
+  </div>
+</header>
+
+<main>
+  <p style="color:var(--tinta-suave);font-size:13px;margin:0 0 8px">
+    El borrador es objeto de prueba, nunca fuente de parametros.
+  </p>
+
+  <section class="seccion">
+    <div class="seccion-cab"><span class="n">1</span><h2>Documentos</h2></div>
+    <div class="panel-punteado" id="drop">
+      Arrastre aqui el <b>borrador de la declaracion</b> (PDF), el <b>auxiliar 2368</b>,
+      el <b>balance de prueba</b>, el <b>reporte de retenciones del ERP</b> y las
+      <b>facturas fuente</b> (o haga clic para elegir). El motor detecta que rol tiene
+      cada archivo por su estructura, no por el nombre.
+      <input type="file" id="file" multiple class="hidden" accept=".pdf,.xlsx,.xls">
+    </div>
+    <div class="files" id="files"></div>
+  </section>
+
+  <section class="seccion">
+    <div class="seccion-cab"><span class="n">2</span><h2>Datos del encargo</h2></div>
+    <div class="panel">
+      <div class="grid">
+        <div><label>NIT del contribuyente</label><input id="nit" placeholder="819002433"></div>
+        <div><label>Periodo (AAAA-MM)</label><input id="periodo" placeholder="2026-07"></div>
+        <div><label>Municipio</label>
+          <select id="municipio"><option value="santa_marta">Santa Marta</option></select>
+        </div>
+        <div><label>Auditor que declara</label><input id="declarado_por" placeholder="Nombre"></div>
+        <div><label>Clave IA (opcional)</label><input id="apikey" type="password" placeholder="sk-ant-..."></div>
+      </div>
+      <div style="margin-top:18px"><button id="run" class="btn btn-principal">Revisar y generar papel</button></div>
+      <div id="msg"></div>
+    </div>
+  </section>
+
+  <div id="res" class="hidden">
+    <section class="seccion">
+      <div class="seccion-cab"><span class="n">3</span><h2>Resultado</h2></div>
+      <div id="semaforo"></div>
+      <div class="kpis" style="margin-top:16px" id="kpis"></div>
+    </section>
+
+    <section class="seccion">
+      <div class="seccion-cab"><span class="n">4</span><h2>Controles</h2></div>
+      <div class="panel" id="controles"></div>
+    </section>
+
+    <section class="seccion hidden" id="sec-excepciones">
+      <div class="seccion-cab"><span class="n">5</span><h2>Excepciones</h2></div>
+      <div class="panel" style="overflow-x:auto"><table class="tabla" id="tabla-excepciones"></table></div>
+    </section>
+
+    <section class="seccion">
+      <div class="seccion-cab"><span class="n">6</span><h2>Conclusion</h2></div>
+      <div class="panel">
+        <div class="concl" id="concl"></div>
+        <a class="dl no-imprimir" id="dl" href="#"><button class="btn btn-principal">Descargar papel de trabajo (Excel)</button></a>
+      </div>
+    </section>
+  </div>
+
+  <div class="foot">Motor deterministico como unica fuente de verdad &middot; la IA interpreta y redacta, jamas calcula.</div>
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+
+$("#cerrar").onclick = async () => {
+  if(!confirm("¿Cerrar la aplicacion? Se detendra el servidor local.")) return;
+  try { await fetch("/salir"); } catch(e){}
+  document.body.innerHTML = "<div style='font-family:Montserrat,sans-serif;text-align:center;margin-top:80px;color:#1b1a5e'><h2>Aplicacion cerrada</h2><p>Ya puede cerrar esta pestaña.</p></div>";
+};
+
+let archivos = [];
+const drop = $("#drop"), file = $("#file");
+drop.onclick = () => file.click();
+drop.ondragover = e => { e.preventDefault(); drop.classList.add("hover"); };
+drop.ondragleave = () => drop.classList.remove("hover");
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove("hover"); add(e.dataTransfer.files); };
+file.onchange = () => add(file.files);
+function add(list){ for(const f of list) archivos.push(f); render(); }
+function render(){ $("#files").innerHTML = archivos.map(f=>`<span>${f.name.endsWith(".pdf")?"\u{1F4C4}":"\u{1F4CA}"} ${f.name}</span>`).join(""); }
+
+const fmt = n => (n==null?"—":new Intl.NumberFormat("es-CO",{maximumFractionDigits:0}).format(n));
+
+const TONO_ESTADO = { OK: "verde", FALLA: "rojo", "NO EJECUTADO": "ambar", ATESTADO: "lila" };
+const TONO_SEMAFORO = { ROJO: "error", AMARILLO: "alerta", VERDE: "ok" };
+
+/* El gesto del lapiz sobre el control que paso, tomado del sistema de
+   Russell Bedford: dice "verificado" mas rapido que cualquier palabra. */
+function svgPunteo(){
+  return `<svg class="punteo" width="18" height="18" viewBox="0 0 24 24" fill="none">
+    <path d="M4 13.5 L9.5 19 L20 5" stroke="var(--verde)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>`;
+}
+const MARCA_ESTADO = {
+  OK: svgPunteo(),
+  FALLA: `<span style="color:var(--rojo);font-weight:700">!</span>`,
+  "NO EJECUTADO": `<span style="color:var(--ambar);font-weight:700">–</span>`,
+  ATESTADO: `<span style="color:var(--lila);font-weight:700">~</span>`,
+};
+
+$("#run").onclick = async () => {
+  const msg = $("#msg"); msg.innerHTML = "";
+  if(archivos.length < 2){ msg.innerHTML = '<div class="aviso error" style="margin-top:12px"><div class="cuerpo">Suba al menos el borrador y el auxiliar 2368.</div></div>'; return; }
+  if(!$("#nit").value || !$("#periodo").value){ msg.innerHTML = '<div class="aviso error" style="margin-top:12px"><div class="cuerpo">NIT y periodo son obligatorios.</div></div>'; return; }
+  const fd = new FormData();
+  archivos.forEach(f => fd.append("archivos", f));
+  fd.append("nit", $("#nit").value);
+  fd.append("periodo", $("#periodo").value);
+  fd.append("municipio", $("#municipio").value);
+  fd.append("declarado_por", $("#declarado_por").value);
+  fd.append("api_key", $("#apikey").value);
+  $("#run").disabled = true; $("#run").textContent = "Procesando…";
+  try {
+    const r = await fetch("/analizar", { method:"POST", body:fd });
+    const data = await r.json();
+    if(!r.ok){ msg.innerHTML = `<div class="aviso error" style="margin-top:12px"><div class="cuerpo">${data.detail||"Error"}</div></div>`; return; }
+    pintar(data);
+  } catch(e){ msg.innerHTML = `<div class="aviso error" style="margin-top:12px"><div class="cuerpo">${e}</div></div>`; }
+  finally { $("#run").disabled = false; $("#run").textContent = "Revisar y generar papel"; }
+};
+
+function pintar(data){
+  const R = data.resumen;
+  $("#res").classList.remove("hidden");
+  $("#dl").href = data.descarga;
+
+  if(R.sin_clasificar && R.sin_clasificar.length){
+    $("#msg").innerHTML = `<div class="aviso alerta" style="margin-top:12px"><div class="cuerpo">No se pudo determinar el rol de: ${R.sin_clasificar.join(", ")}. Se ignoraron.</div></div>`;
+  }
+
+  const s = R.semaforo, tono = TONO_SEMAFORO[s.color] || "info";
+  $("#semaforo").innerHTML = `<div class="aviso ${tono}"><b>SOLIDEZ DE LA REVISION: ${s.color}</b>
+    <div class="cuerpo">${s.motivo}</div></div>`;
+
+  const c = R.cifras;
+  $("#kpis").innerHTML = `
+    <div class="kpi"><div class="v cifra">${fmt(c.auxiliar)}</div><div class="l">Auxiliar 2368</div></div>
+    <div class="kpi"><div class="v cifra">${fmt(c.erp)}</div><div class="l">Reporte del ERP</div></div>
+    <div class="kpi"><div class="v cifra">${fmt(c.base_gravable)}</div><div class="l">Base gravable</div></div>
+    <div class="kpi"><div class="v cifra">${fmt(c.impuesto_declarable)}</div><div class="l">Impuesto declarable</div></div>
+    <div class="kpi"><div class="v cifra">${fmt(c.declarado)}</div><div class="l">Declarado (renglon 24)</div></div>
+    <div class="kpi"><div class="v cifra">${fmt(R.impacto_total)}</div><div class="l">Impacto cuantificado</div></div>
+    <div class="kpi"><div class="v">${R.puede_concluir_limpio?"SI":"NO"}</div><div class="l">Conclusion limpia</div></div>`;
+
+  $("#controles").innerHTML = R.controles.map(ctl => `
+    <div class="control">
+      <div class="marca-check">${MARCA_ESTADO[ctl.estado] ?? ""}</div>
+      <div class="cuerpo">
+        <p class="titulo"><span class="cod">${ctl.codigo}</span> ${ctl.nombre}
+          <span class="chip chip-${TONO_ESTADO[ctl.estado] ?? "gris"}">${ctl.estado}</span></p>
+        <p class="detalle">${ctl.detalle}</p>
+      </div>
+    </div>`).join("");
+
+  const hs = R.excepciones || [];
+  $("#sec-excepciones").classList.toggle("hidden", hs.length === 0);
+  $("#tabla-excepciones").innerHTML = hs.length ? `
+    <tr><th>Severidad</th><th>Control</th><th>Ref.</th><th>Descripcion</th><th>Impacto $</th></tr>
+    ${hs.map(h => `<tr><td class="sev-${h.severidad}">${h.severidad}</td><td>${h.control}</td>
+      <td class="cifra" style="font-size:12px">${h.tipo_referencia?h.tipo_referencia+" "+h.renglon:""}</td>
+      <td>${h.descripcion}</td><td class="cifra">${fmt(h.impacto)}</td></tr>`).join("")}` : "";
+
+  $("#concl").innerHTML = R.conclusion || "";
+}
+</script>
+</body>
+</html>

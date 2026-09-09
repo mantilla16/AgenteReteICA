@@ -647,15 +647,26 @@ def c13_formales(borrador, municipio, insumos_obtenidos,
     # Si algun dia se quiere verificar la firma, corresponde al momento de la
     # PRESENTACION de la declaracion, no a la revision del borrador.
 
+    # El texto de "todo bien" no puede afirmar sobre insumos si arriba ya se
+    # reporto alguno faltante: _resolver antepone "N excepcion(es); " a este
+    # mismo texto cuando hay excepciones, y "insumos completos" quedaba
+    # contradiciendo, en la misma frase, las excepciones de insumo que la
+    # anteceden. Verificado contra la carpeta real de julio 2026 (sin
+    # balance ni pago_anterior): decia literalmente "2 excepcion(es);
+    # insumos completos; vencimiento 2026-08-14".
+    insumos_completos = not excepciones
+
     try:
         vencimiento = municipio.vencimiento(borrador.periodo)
-        detalle = "insumos completos; vencimiento %s" % vencimiento
+        detalle = ("insumos completos; vencimiento %s" % vencimiento
+                   if insumos_completos else "vencimiento %s" % vencimiento)
     except KeyError:
         excepciones.append(Excepcion(
             severidad=Severidad.AVISO, control="C13",
             descripcion="no hay fecha de vencimiento parametrizada para %s"
                         % borrador.periodo))
-        detalle = "insumos completos; sin vencimiento parametrizado"
+        detalle = ("insumos completos; sin vencimiento parametrizado"
+                   if insumos_completos else "sin vencimiento parametrizado")
 
     return _resolver("C13", nombre, excepciones, detalle)
 

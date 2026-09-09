@@ -91,6 +91,21 @@ def test_c13_detecta_insumos_no_obtenidos(borrador):
     assert any("no obtenido" in e.descripcion.lower() for e in r.excepciones)
 
 
+def test_c13_no_dice_insumos_completos_cuando_faltan(borrador):
+    """El detalle no puede contradecir sus propias excepciones.
+
+    Bug real: con insumos faltantes, el detalle decia literalmente
+    "2 excepcion(es); insumos completos; vencimiento 2026-08-14" -- la
+    misma frase afirmando y negando lo mismo. Verificado contra la carpeta
+    real de julio 2026 (donde faltan balance y pago_anterior).
+    """
+    r = c13_formales(borrador, MUNICIPIO,
+                     {"borrador", "auxiliar", "erp", "facturas"})
+    assert r.estado is Estado.FALLA
+    assert "insumos completos" not in r.detalle.lower()
+    assert "vencimiento" in r.detalle.lower()
+
+
 def test_c13_pasa_con_todos_los_insumos(borrador):
     completos = {"borrador", "auxiliar", "balance", "erp", "facturas", "pago_anterior"}
     assert c13_formales(borrador, MUNICIPIO, completos).estado is Estado.OK

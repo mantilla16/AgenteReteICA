@@ -20,11 +20,16 @@ GRIS = "F2F2F2"
 VERDE = "C6EFCE"
 ROJO = "FFC7CE"
 AMBAR = "FFEB9C"
+LILA = "D9E2F3"
 
 _RELLENO_ESTADO = {
     Estado.OK: VERDE,
     Estado.FALLA: ROJO,
     Estado.NO_EJECUTADO: AMBAR,
+    # X1: ATESTADO no es OK -- nadie recalculo contra el estatuto -- ni
+    # NO_EJECUTADO -- si hubo procedimiento, el testimonio del auditor. Su
+    # propio color evita que se lea como cualquiera de los otros dos.
+    Estado.ATESTADO: LILA,
 }
 
 _BORDE = Border(*[Side(style="thin", color="BFBFBF")] * 4)

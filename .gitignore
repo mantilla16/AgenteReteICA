@@ -1,3 +1,9 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+
+# binario empaquetado (120MB, se genera con PyInstaller: ver lanzador.py) y
+# salidas de prueba sueltas -- nunca pertenecen al repositorio
+*.exe
+papel_reteica_*
+!papel_reteica_*.xlsx
