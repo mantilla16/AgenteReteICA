@@ -271,13 +271,28 @@ _INSUMOS = {
 }
 
 
+AMBIGUO = "AMBIGUO"
+DESCONOCIDO = "DESCONOCIDO"
+
+
 def _naturaleza(concepto):
+    """Naturaleza del concepto, sin resolver los empates por orden.
+
+    Antes, "SUMINISTRO E INSTALACION DE VALVULA" devolvia SERVICIO unicamente
+    porque la lista de servicios se chequeaba primero. Eso no es juicio, es
+    orden de lineas de codigo: ahora el empate se declara AMBIGUO y el que
+    no cae en ninguna lista se declara DESCONOCIDO, en vez de None silencioso.
+    """
     texto = concepto.upper()
-    if any(palabra in texto for palabra in _PALABRAS_SERVICIO):
+    servicio = any(palabra in texto for palabra in _PALABRAS_SERVICIO)
+    comercio = any(palabra in texto for palabra in _PALABRAS_COMERCIO)
+    if servicio and comercio:
+        return AMBIGUO
+    if servicio:
         return "SERVICIO"
-    if any(palabra in texto for palabra in _PALABRAS_COMERCIO):
+    if comercio:
         return "COMERCIO"
-    return None
+    return DESCONOCIDO
 
 
 def c6_clasificacion_por_linea(reconstruccion, facturas, mapa_actividad,
@@ -314,8 +329,10 @@ def c6_clasificacion_por_linea(reconstruccion, facturas, mapa_actividad,
         codigo = _renglon_de(linea.nit, valorada.tarifa)
         if codigo is None:
             continue
-        if _naturaleza(linea.concepto) == "SERVICIO" and codigo.startswith(
-                _ACTIVIDADES_COMERCIO):
+        naturaleza = _naturaleza(linea.concepto)
+        es_renglon_comercio = codigo.startswith(_ACTIVIDADES_COMERCIO)
+
+        if naturaleza == "SERVICIO" and es_renglon_comercio:
             excepciones.append(Excepcion(
                 severidad=Severidad.OBSERVACION, control="C6",
                 descripcion="%s (NIT %s): el concepto [%s] es un servicio pero "
@@ -323,6 +340,31 @@ def c6_clasificacion_por_linea(reconstruccion, facturas, mapa_actividad,
                             "por mayor"
                             % (linea.referencia, linea.nit, linea.concepto, codigo),
                 renglon=codigo, impacto_pesos=_CERO))
+        # El lado que faltaba: un control asimetrico deja media poblacion sin
+        # cubrir y no lo dice.
+        elif naturaleza == "COMERCIO" and not es_renglon_comercio:
+            excepciones.append(Excepcion(
+                severidad=Severidad.OBSERVACION, control="C6",
+                descripcion="%s (NIT %s): el concepto [%s] es una compra de "
+                            "mercancia (comercio) pero esta clasificado en el "
+                            "renglon %s, que no es de comercio"
+                            % (linea.referencia, linea.nit, linea.concepto, codigo),
+                renglon=codigo, impacto_pesos=_CERO))
+        elif naturaleza == AMBIGUO:
+            excepciones.append(Excepcion(
+                severidad=Severidad.AVISO, control="C6",
+                descripcion="%s (NIT %s): el concepto [%s] es ambiguo -- menciona "
+                            "compra y servicio a la vez -- y no se puede "
+                            "clasificar sin criterio humano"
+                            % (linea.referencia, linea.nit, linea.concepto),
+                renglon=codigo))
+        elif naturaleza == DESCONOCIDO:
+            excepciones.append(Excepcion(
+                severidad=Severidad.AVISO, control="C6",
+                descripcion="%s (NIT %s): el concepto [%s] no se pudo clasificar "
+                            "como compra ni como servicio; queda sin cubrir"
+                            % (linea.referencia, linea.nit, linea.concepto),
+                renglon=codigo))
 
     for nit, factura in sorted(por_nit.items()):
         declarada = _renglon_de(nit)
@@ -541,7 +583,7 @@ def c14_compras_vs_servicios(reconstruccion, municipio) -> ResultadoControl:
 
     excepciones = []
     for valorada in reconstruccion.lineas_valoradas:
-        if _naturaleza(valorada.linea.concepto) is None:
+        if _naturaleza(valorada.linea.concepto) in (AMBIGUO, DESCONOCIDO):
             excepciones.append(Excepcion(
                 severidad=Severidad.AVISO, control="C14",
                 descripcion="%s: no se pudo clasificar el concepto [%s] como "
