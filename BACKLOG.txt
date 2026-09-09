@@ -182,7 +182,27 @@ ETAPA 2 - C11 CON LA BASE DE LA FACTURA (mayor ganancia por esfuerzo)
     FE10 -> 35.000, FE338057 -> 11.970 esperado; confirmar contra el
     auxiliar al implementar).
 
-2.1 C11 parsea la base y NO la usa
+2.1 [HECHO 2026-09-09]
+    HECHO: c11_cotejo_facturas(lineas, facturas, municipio) verifica
+    base_del_PDF x tarifa_de_la_cuenta == retencion_del_auxiliar. La tarifa
+    sale de la CUENTA CONTABLE (auxiliar), nunca del borrador.
+    Cambio de fondo: cada campo se verifica POR SEPARADO. Antes una factura
+    sin NIT legible se descartaba entera (continue por confianza != ALTA) y su
+    base no se cotejaba nunca -- la base recuperada en 2.0 no servia de nada.
+    RESULTADO CONTRA LOS DATOS REALES: 3 de 3 facturas con la base verificada.
+      250530   1.829.605 x 10 por mil = 18.296 = 18.296 contable
+      FE10     5.000.000 x  7 por mil = 35.000 = 35.000 contable
+      FE338057 1.196.993 x 10 por mil = 11.970 = 11.970 contable
+    FE338057 sigue avisando que su NIT no es legible (AVISO, cotejo manual):
+    sin OCR no hay forma, y P2 cerro que no se construye OCR.
+    Mutaciones probadas (tests/test_c11_base_y_retencion.py, 10 pruebas):
+      base alterada a 2.000.000 -> HALLAZGO con impacto 1.704
+      base alterada en 1 peso -> dispara igual
+      diferencia de 1 peso por redondeo del ERP -> NO dispara (tolerancia)
+      tarifa de la cuenta cambiada a 20 por mil -> dispara (prueba que la
+        tarifa se lee de tarifa_por_cuenta y no del borrador)
+    Se mutan los objetos leidos, NUNCA las fixtures.
+    C11 parsea la base y NO la usa
     Hoy C11 compara NIT, existencia y fecha. Nunca la base ni la retencion,
     aunque facturas_pdf SI extrae la base. Informa "3 factura(s) cotejadas"
     habiendo verificado dos campos: sobreafirmacion del alcance.
@@ -431,7 +451,79 @@ CORREGIR (aprobado por Felipe 2026-09-09) -- rapidos y quitan las criticas
 mas faciles de hacer
 --------------------------------------------------------------------------------
 
-M6. CODIGO DE SALIDA DEL CLI MIENTE
+M6. [HECHO 2026-09-09]
+    HECHO: cli._codigo_de_salida(informe) con las constantes LIMPIO=0,
+    CON_EXCEPCIONES=1, INSUMO_FALTANTE=2, NO_CONCLUYENTE=3.
+    NO_CONCLUYENTE pesa mas que CON_EXCEPCIONES: una excepcion encontrada es
+    un resultado, un control sin ejecutar es la AUSENCIA de resultado.
+    Verificado contra la carpeta real: EXIT=3.
+    test_revision_ia_y_cli esperaba 0 en esa misma corrida (con "Conclusion
+    limpia: NO" impreso); esa expectativa ERA la mentira que M6 corrige, se
+    actualizo a NO_CONCLUYENTE. Pruebas: tests/test_cli_codigo_salida.py (6).
+
+M7. [HECHO 2026-09-09]
+    HECHO (a): los tres commits de la sesion previa solo incluyeron archivos
+    MODIFICADOS. controles.py, reconstruccion.py, tipos.py, hallazgos.py,
+    borrador_pdf.py, cli.py, parametros/municipios/, las fixtures, conftest,
+    test_anclas y test_mutacion estaban SIN RASTREAR: el repositorio no podia
+    reconstruir el motor, que es justo lo que M7(a) exige. Commit 71bf74f.
+    Verificado que no hay remoto: los datos del cliente no salen a ningun lado.
+    HECHO (b): motor_reteica.__version__ = "1.0.0".
+    HECHO (c): motor_reteica/version.py con huella_del_codigo() -> hash corto
+    del commit, sufijo "+sucio" si el arbol de ESTA carpeta tiene cambios sin
+    commitear, "sin-git" si no hay repositorio. Estampado en la Caratula como
+    VERSION DEL MOTOR y HUELLA DEL CODIGO.
+    La huella no se maquilla: un papel generado sobre codigo no versionado no
+    es reproducible y tiene que decirlo.
+    Pruebas: tests/test_version_en_el_papel.py (5).
+
+M8. [HECHO 2026-09-09 -- junto con 2.1]
+    HECHO: el detalle de C11 declara cobertura. Corrida real:
+      "3 factura(s): 3 con la base verificada contra la retencion del
+       auxiliar; 1 sin NIT legible; 2 excepcion(es)"
+    Nota de diseno encontrada al hacerlo: _resolver() DESCARTA el detalle
+    cuando hay excepciones y deja solo "N excepcion(es)". C11 ya no lo usa y
+    construye su ResultadoControl directo, porque la cobertura hay que
+    declararla sobre todo cuando el control falla. Los demas controles siguen
+    con _resolver y tienen el mismo defecto -> ver M14.
+
+M14. _resolver() PIERDE EL DETALLE CUANDO EL CONTROL FALLA
+    controles.py: si hay excepciones, detalle pasa a ser "%d excepcion(es)" y
+    el detalle_ok -- que dice QUE se verifico y sobre cuantos elementos -- se
+    tira. Justo cuando el control falla es cuando mas hace falta saber el
+    alcance de lo que si se miro.
+    Encontrado al implementar M8. C11 ya se salio de _resolver; falta decidir
+    si se arregla _resolver para todos (cambia el texto de varios detalles y
+    hay que revisar que ninguna prueba dependa de esas cadenas) o si cada
+    control declara su cobertura por su cuenta.
+    FUERA DE ALCANCE del loop de etapas 1 y 2.
+
+M15. EL MANIFIESTO DECLARABA COMO BALANCE EL PAPEL DE TRABAJO DE LA FIRMA
+    Encontrado 2026-09-09 al retomar el loop. El manifiesto.json de la carpeta
+    real declaraba:
+      "balance": "PT Revision Industria y Comercio Julio-Terlica 2026.xlsx"
+    Ese archivo NO es una fuente del cliente: es el papel de trabajo MANUAL DE
+    LA FIRMA (hojas Check List, DECLARACION, REVISION ICA, Validacion de
+    facturas...). Tiene dentro una hoja BALANCE y por eso paso la verificacion
+    de tipo de 1.5, y C2 salia OK.
+    Es circularidad un nivel mas arriba: C2 amarraria el auxiliar contra el
+    propio producto de la firma, y el hash que el papel registra como "balance"
+    seria el del papel de trabajo de la firma.
+    VERIFICADO: las cifras coinciden con el export de SAP (36.318 / 438.243)
+    porque el auditor lo pego ahi. El problema NO son las cifras, es la
+    PROCEDENCIA.
+    ACCION TOMADA: "balance": null en el manifiesto, con nota explicativa.
+    C2 vuelve a NO EJECUTADO, que es el estado honesto y coincide con X2.
+    Anclas intactas.
+    LECCION PARA 1.5: verificar_tipo_documento comprueba ESTRUCTURA, no
+    PROCEDENCIA. Un archivo con las columnas correctas pasa sin importar quien
+    lo produjo. No hay forma automatica de cerrar eso; corresponde a quien
+    declara el manifiesto. Vale la pena que el papel imprima el NOMBRE REAL de
+    cada archivo declarado, para que un socio pueda ver de un vistazo que se
+    uso como balance.
+
+    --- diagnostico original de M6, se conserva como registro ---
+M6-orig. CODIGO DE SALIDA DEL CLI MIENTE
     cli.py: return 0 if ctx.informe.impacto_total == 0 else 1
     Verificado en la corrida real: devolvio exit=0 con C7, C12 y C14 sin
     ejecutar y "Conclusion limpia: NO". Cualquier automatizacion que lea el
@@ -443,7 +535,7 @@ M6. CODIGO DE SALIDA DEL CLI MIENTE
       2 = insumo obligatorio faltante / C0 detuvo (ya existe)
       3 = hay controles NO EJECUTADO -> la revision no es concluyente
 
-M7. NO SE PUEDE DECIR QUE VERSION GENERO EL PAPEL
+M7-orig. NO SE PUEDE DECIR QUE VERSION GENERO EL PAPEL
     Verificado: no hay __version__ en ningun modulo, el papel no estampa
     version de motor, y `git log` del proyecto esta VACIO -- todo el codigo
     esta sin commitear. El papel SI registra el SHA-256 de las 4 fuentes
@@ -454,7 +546,7 @@ M7. NO SE PUEDE DECIR QUE VERSION GENERO EL PAPEL
     (c) estampar version del motor + hash del commit en la Caratula, al lado
     de las huellas de las fuentes.
 
-M8. C11 SOBREAFIRMA SU ALCANCE
+M8-orig. C11 SOBREAFIRMA SU ALCANCE
     Informa "3 factura(s) cotejadas" habiendo verificado solo NIT y fecha, y
     con 1 de las 3 sin poder leer. El detalle del control debe decir QUE se
     cotejo y CUANTAS quedaron sin leer. Ej: "2 de 3 facturas cotejadas en NIT
