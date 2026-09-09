@@ -126,11 +126,11 @@ def _hoja_controles(libro, ctx):
 
 
 def _hoja_liquidacion(libro, ctx):
-    hoja = libro.create_sheet("Liquidacion")
+    hoja = libro.create_sheet("Recalculo")
     for letra, ancho in zip("ABCDEFG", (12, 10, 18, 18, 18, 18, 14)):
         hoja.column_dimensions[letra].width = ancho
 
-    fila = _titulo(hoja, 1, "LIQUIDACION - AUDITORIA vs DECLARACION", ancho=7)
+    fila = _titulo(hoja, 1, "RECALCULO DE AUDITORIA vs DECLARACION", ancho=7)
     fila = _encabezados(hoja, fila, [
         "ACTIVIDAD", "TARIFA", "BASE AUDITORIA", "BASE DECLARADA",
         "IMPTO AUDITORIA", "IMPTO DECLARADO", "DIFERENCIA"])
@@ -297,7 +297,21 @@ def _hoja_notas(libro, ctx):
     return fila
 
 
-def generar_papel(ruta_salida, ctx) -> Path:
+def generar_papel(*argumentos) -> Path:
+    """M4: acepta (ctx, ruta) y tambien la forma historica (ruta, ctx).
+
+    El orden original era contraintuitivo y ya provoco una llamada invertida.
+    En vez de romper a quien ya lo usa, se resuelve por tipo.
+    """
+    primero, segundo = argumentos
+    if hasattr(primero, "informe"):
+        ctx, ruta_salida = primero, segundo
+    else:
+        ruta_salida, ctx = primero, segundo
+    return _generar(ruta_salida, ctx)
+
+
+def _generar(ruta_salida, ctx) -> Path:
     libro = openpyxl.Workbook()
     _hoja_notas(libro, ctx)
     _hoja_caratula(libro, ctx)

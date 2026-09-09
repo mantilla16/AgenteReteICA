@@ -27,7 +27,7 @@ def _texto(hoja):
 
 
 def test_genera_las_hojas_del_papel(libro):
-    assert {"Notas", "Caratula", "Controles", "Liquidacion", "Cruces",
+    assert {"Notas", "Caratula", "Controles", "Recalculo", "Cruces",
             "Excepciones", "Parametros"} == set(libro.sheetnames)
 
 
@@ -72,8 +72,8 @@ def test_los_controles_traen_los_quince_codigos(libro):
         assert "C%d" % numero in texto
 
 
-def test_la_liquidacion_reproduce_las_anclas(libro):
-    texto = _texto(libro["Liquidacion"])
+def test_el_recalculo_reproduce_las_anclas(libro):
+    texto = _texto(libro["Recalculo"])
     assert "474561" in texto.replace(".0", "")
     assert "474000" in texto.replace(".0", "")
 

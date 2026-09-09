@@ -22,10 +22,17 @@ def _no_ejecutado(codigo: str, nombre: str, insumo: str) -> ResultadoControl:
 
 
 def _resolver(codigo, nombre, excepciones, detalle_ok):
+    """M14: el detalle sobrevive a la falla.
+
+    Antes, si habia excepciones el detalle pasaba a ser "%d excepcion(es)" y
+    se tiraba el que decia QUE se verifico y sobre cuantos elementos. Justo
+    cuando un control falla es cuando mas hace falta saber el alcance de lo
+    que si se miro.
+    """
     if excepciones:
         return ResultadoControl(
             codigo=codigo, nombre=nombre, estado=Estado.FALLA,
-            detalle="%d excepcion(es)" % len(excepciones),
+            detalle="%d excepcion(es); %s" % (len(excepciones), detalle_ok),
             excepciones=tuple(excepciones))
     return ResultadoControl(codigo=codigo, nombre=nombre, estado=Estado.OK,
                             detalle=detalle_ok)
@@ -279,20 +286,13 @@ def _c7_contra_atestacion(borrador, atestacion, nombre) -> ResultadoControl:
 def c10_redondeo(borrador, reconstruccion) -> ResultadoControl:
     """Cada renglon declarado debe ser el redondeo al mil del contable."""
     nombre = "Redondeo al mil por renglon"
-    declarado = {a.codigo: a for a in borrador.actividades}
 
+    # M3: este control YA NO repite la comparacion renglon por renglon contra
+    # el borrador. Ese bucle era literalmente la segunda verificacion de C9 y
+    # duplicaba el mismo hallazgo en el informe, inflando el conteo de
+    # excepciones. C10 se queda con lo suyo: explicar la diferencia entre el
+    # impuesto exacto y el declarable como efecto del redondeo al mil.
     excepciones = []
-    for codigo, renglon in reconstruccion.por_actividad.items():
-        actividad = declarado.get(codigo)
-        if actividad is None:
-            continue
-        if renglon.impuesto_declarable != actividad.impuesto:
-            excepciones.append(Excepcion(
-                severidad=Severidad.HALLAZGO, control="C10",
-                descripcion="actividad %s: redondeo esperado %s, declarado %s"
-                            % (codigo, renglon.impuesto_declarable, actividad.impuesto),
-                renglon=codigo,
-                impacto_pesos=abs(renglon.impuesto_declarable - actividad.impuesto)))
 
     diferencia = (reconstruccion.total_impuesto_contable
                   - reconstruccion.total_impuesto_declarable)
