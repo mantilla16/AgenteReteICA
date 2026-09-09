@@ -11,7 +11,8 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
 import motor_reteica
 from motor_reteica.hallazgos import LIMITACION_INTEGRIDAD
-from motor_reteica.tipos import Estado
+from motor_reteica.semaforo import evaluar
+from motor_reteica.tipos import Estado, Severidad
 from motor_reteica.version import huella_del_codigo
 
 AZUL = "001871"
@@ -65,8 +66,7 @@ def _nota_alcance(hoja, fila):
 
 
 def _hoja_caratula(libro, ctx):
-    hoja = libro.active
-    hoja.title = "Caratula"
+    hoja = libro.create_sheet("Caratula")
     hoja.column_dimensions["A"].width = 34
     for letra in "BCDEFGH":
         hoja.column_dimensions[letra].width = 18
@@ -252,8 +252,54 @@ def _hoja_parametros(libro, ctx):
     _nota_alcance(hoja, fila)
 
 
+def _hoja_notas(libro, ctx):
+    """5.4: la PRIMERA hoja del papel. Semaforo arriba, una linea por nota,
+    ordenadas por importancia, sin parrafos.
+
+    Motivo: las conclusiones largas no se leen. Esta hoja es la puerta de
+    entrada, no el reemplazo de la conclusion.
+    """
+    hoja = libro.active
+    hoja.title = "Notas"
+    hoja.column_dimensions["A"].width = 6
+    hoja.column_dimensions["B"].width = 10
+    hoja.column_dimensions["C"].width = 78
+    hoja.column_dimensions["D"].width = 20
+
+    luz = evaluar(ctx.informe)
+    fila = _titulo(hoja, 1, "LO PRIMERO QUE HAY QUE MIRAR")
+    fila = _fila(hoja, fila, ["SOLIDEZ DE LA REVISION", luz.color, luz.motivo])
+    fila = _fila(hoja, fila, ["", "", "Califica que tan respaldada esta la "
+                                      "revision, no la calidad del borrador."])
+    fila += 1
+
+    _SIMBOLOS = {Severidad.HALLAZGO: "[!]", Severidad.OBSERVACION: "[-]",
+                 Severidad.AVISO: "[i]"}
+    fila = _titulo(hoja, fila, "NOTAS")
+    for excepcion in ctx.informe.excepciones_ordenadas:
+        impacto = ("impacto %s" % excepcion.impacto_pesos
+                   if excepcion.impacto_pesos else "impacto $0")
+        fila = _fila(hoja, fila, [_SIMBOLOS[excepcion.severidad],
+                                  excepcion.control,
+                                  excepcion.descripcion, impacto])
+
+    for codigo in ctx.informe.controles_no_ejecutados:
+        resultado = next(r for r in ctx.resultados if r.codigo == codigo)
+        fila = _fila(hoja, fila, ["[--]", codigo, resultado.detalle,
+                                  "NO EJECUTADO"])
+    for codigo in ctx.informe.controles_atestados:
+        resultado = next(r for r in ctx.resultados if r.codigo == codigo)
+        fila = _fila(hoja, fila, ["[A]", codigo, resultado.detalle, "ATESTADO"])
+
+    if not ctx.informe.excepciones_ordenadas and             not ctx.informe.controles_no_ejecutados:
+        fila = _fila(hoja, fila, ["", "", "Sin excepciones ni controles "
+                                          "pendientes.", ""])
+    return fila
+
+
 def generar_papel(ruta_salida, ctx) -> Path:
     libro = openpyxl.Workbook()
+    _hoja_notas(libro, ctx)
     _hoja_caratula(libro, ctx)
     _hoja_controles(libro, ctx)
     _hoja_liquidacion(libro, ctx)

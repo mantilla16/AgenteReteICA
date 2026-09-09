@@ -3,10 +3,13 @@
 import argparse
 import sys
 
+from motor_reteica.ia.cliente import (MODELO_POR_DEFECTO, VARIABLE_LLAVE,
+                                      ClienteIA)
 from motor_reteica.identidad import IdentidadIncompatible
 from motor_reteica.papel_excel import generar_papel
 from motor_reteica.parametros.municipios.santa_marta import MUNICIPIO
 from motor_reteica.pipeline import revisar
+from motor_reteica.semaforo import evaluar
 from motor_reteica.tipos import Estado
 
 MUNICIPIOS = {"santa_marta": MUNICIPIO}
@@ -56,6 +59,9 @@ def _tablero(ctx) -> None:
     print("-" * 78)
     print("Excepciones: %d | impacto cuantificado: %s pesos"
           % (len(ctx.informe.excepciones_ordenadas), ctx.informe.impacto_total))
+    luz = evaluar(ctx.informe)
+    print("Solidez de la revision: %s %s -- %s"
+          % (luz.simbolo, luz.color, luz.motivo))
     print("Conclusion limpia: %s"
           % ("SI" if ctx.informe.puede_concluir_limpio else "NO"))
 
@@ -73,11 +79,23 @@ def main(argv=None) -> int:
     parser.add_argument("--municipio", default="santa_marta",
                         choices=sorted(MUNICIPIOS))
     parser.add_argument("--salida", default="papel_reteica.xlsx")
+    parser.add_argument("--revision-inteligente", action="store_true",
+                        help="ejecuta los controles de IA (IA-1, IA-3). "
+                             "Requiere la llave en %s o --api-key."
+                             % VARIABLE_LLAVE)
+    parser.add_argument("--api-key", default=None,
+                        help="llave de Anthropic; por defecto se toma de %s"
+                             % VARIABLE_LLAVE)
+    parser.add_argument("--modelo", default=MODELO_POR_DEFECTO)
     args = parser.parse_args(argv)
 
     try:
+        cliente_ia = None
+        if args.revision_inteligente:
+            cliente_ia = ClienteIA(modelo=args.modelo, api_key=args.api_key)
         ctx = revisar(args.carpeta, nit=args.nit, periodo=args.periodo,
-                      municipio=MUNICIPIOS[args.municipio])
+                      municipio=MUNICIPIOS[args.municipio],
+                      cliente_ia=cliente_ia)
     except IdentidadIncompatible as error:
         print("C0 DETUVO LA REVISION: %s" % error, file=sys.stderr)
         return 2

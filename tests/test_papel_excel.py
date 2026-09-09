@@ -27,8 +27,25 @@ def _texto(hoja):
 
 
 def test_genera_las_hojas_del_papel(libro):
-    assert {"Caratula", "Controles", "Liquidacion", "Cruces", "Excepciones",
-            "Parametros"} == set(libro.sheetnames)
+    assert {"Notas", "Caratula", "Controles", "Liquidacion", "Cruces",
+            "Excepciones", "Parametros"} == set(libro.sheetnames)
+
+
+def test_notas_es_la_primera_hoja(libro):
+    """5.4: las conclusiones largas no se leen. La puerta de entrada va
+    primero, con el semaforo arriba."""
+    assert libro.sheetnames[0] == "Notas"
+    texto = _texto(libro["Notas"])
+    assert "SOLIDEZ DE LA REVISION" in texto
+    assert any(color in texto for color in ("ROJO", "AMARILLO", "VERDE"))
+
+
+def test_notas_lista_los_controles_no_ejecutados(libro):
+    """Un control sin ejecutar tiene que verse en la primera hoja, no solo
+    enterrado en la conclusion."""
+    texto = _texto(libro["Notas"])
+    assert "NO EJECUTADO" in texto
+    assert "C7" in texto
 
 
 def test_la_caratula_identifica_cliente_periodo_y_municipio(libro):

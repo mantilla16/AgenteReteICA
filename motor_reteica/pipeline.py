@@ -20,6 +20,7 @@ from pathlib import Path
 from motor_reteica import controles
 from motor_reteica.atestacion import leer_atestacion
 from motor_reteica.hallazgos import consolidar
+from motor_reteica.ia import controles_ia
 from motor_reteica.identidad import (IdentidadIncompatible, huella,
                                      verificar_identidad, verificar_tipo_documento)
 from motor_reteica.ingesta.auxiliar import leer_auxiliar
@@ -180,7 +181,8 @@ def _resolver_legado(carpeta):
     return rutas, presentes, rutas_facturas
 
 
-def revisar(carpeta, nit, periodo, municipio) -> ContextoRevision:
+def revisar(carpeta, nit, periodo, municipio,
+            cliente_ia=None) -> ContextoRevision:
     carpeta = Path(carpeta)
     manifiesto = None
 
@@ -271,6 +273,19 @@ def revisar(carpeta, nit, periodo, municipio) -> ContextoRevision:
         controles.c14_compras_vs_servicios(recon, municipio),
         controles.c15_formato_historico(borrador, historico, periodo),
     ]
+
+    # D7: la IA tiene CARRIL PROPIO. No modifica C0..C15; sus salidas entran
+    # como controles con los mismos estados, de modo que un hallazgo suyo
+    # bloquee la conclusion limpia igual que uno de C9. Si el modelo no se
+    # puede llamar, salen NO_EJECUTADO -- nunca OK.
+    if cliente_ia is not None:
+        resultados.append(
+            controles_ia.ia1_plausibilidad(recon, borrador, municipio,
+                                           cliente=cliente_ia))
+        informe_previo = consolidar(resultados)
+        resultados.append(
+            controles_ia.ia3_consistencia(resultados, informe_previo,
+                                          cliente=cliente_ia))
 
     return ContextoRevision(
         nit=nit,
