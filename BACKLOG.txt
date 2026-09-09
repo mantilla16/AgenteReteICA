@@ -613,7 +613,7 @@ M11. CUENTAS_EXCLUIDAS ES ESPECIFICA DE TERLICA, NO DEL PUC
     y queda impreso.
     La exclusion sale de puc.py: no es constante del PUC.
 
-M12. EL BORRADOR TIENE 3 PAGINAS Y SE LEE SOLO LA PRIMERA
+M12. [HECHO 2026-09-09] EL BORRADOR TIENE 3 PAGINAS Y SE LEE SOLO LA PRIMERA
     leer_borrador usa pdf.pages[0]. VERIFICADO que hoy es CORRECTO: las tres
     paginas son copias identicas (original, declarante, banco) y cada una
     trae las 5 filas de actividad y los 22 renglones. Leer todas triplicaria
@@ -621,11 +621,32 @@ M12. EL BORRADOR TIENE 3 PAGINAS Y SE LEE SOLO LA PRIMERA
     Riesgo no documentado: si algun mes el cuadro C se desborda a una segunda
     pagina real, se truncaria en silencio. Verificar que pasa con mas
     actividades de las que caben en una pagina.
+    HECHO: no se escribio parsing especulativo de paginacion para un layout
+    que nunca se ha visto (no hay dato real que lo muestre). En vez de eso se
+    verifico que la red de seguridad YA existente lo ataja: C1 suma impuesto
+    y base de las actividades parseadas contra los renglones 23/24 del propio
+    borrador; una actividad perdida por desborde de pagina rompe esa suma y
+    C1 falla con el impacto exacto de lo truncado, antes de tocar la
+    contabilidad. Documentado en el docstring de borrador_pdf.py y probado en
+    test_c1_cierra_el_riesgo_m12_de_una_actividad_truncada_por_desborde_de_pagina
+    (tests/test_controles_exactitud.py).
 
-M13. Excepcion.renglon ESTA SOBRECARGADO
+M13. [HECHO 2026-09-09] Excepcion.renglon ESTA SOBRECARGADO
     El spec dice "renglon del formulario afectado", pero C2 mete la cuenta
     contable, C3 mete el NIT y C6/C9 si meten el renglon. Importa para la
     hoja de notas de 5.4, que va a ordenar y mostrar por esa columna.
+    HECHO: se agrego Excepcion.tipo_referencia (REF_CUENTA/REF_NIT/
+    REF_RENGLON en tipos.py) de forma ADITIVA -- no se renombro `renglon`,
+    que habria tocado cada control, cada prueba que lo lee y el encabezado
+    del papel para una ganancia mayormente cosmetica. Los ~25 sitios que
+    construyen Excepcion en controles.py e ia/controles_ia.py quedan
+    etiquetados; la hoja Excepciones del papel gana la columna "TIPO DE
+    REF.". Nota: la hoja Notas de 5.4 NO ordena ni muestra por `renglon` --
+    ordena por severidad -- asi que ese riesgo puntual no se materializo.
+    Prueba: test_todas_las_excepciones_con_renglon_no_vacio_declaran_su_tipo
+    (tests/test_tipo_referencia.py) verifica que ninguna excepcion con
+    `renglon` no vacio quede sin tipo, sobre TODOS los controles de una
+    corrida real, no solo casos puntuales.
 
 M9. LA HOJA "LIQUIDACION" TIENE NOMBRE INCOMODO
     El seccion 2 del diseno insiste en que el objetivo NO es liquidar el
@@ -1138,9 +1159,10 @@ Anclas: auxiliar 474.561 = ERP 474.561; base 49.012.569; declarable 474.000
 
 LO QUE SIGUE ABIERTO
 --------------------
-M13  Excepcion.renglon sigue sobrecargado (cuenta / NIT / renglon). Se dejo
-     como esta: cambiarlo toca todos los controles y la ganancia es cosmetica.
-M12  Verificar que pasa si el cuadro C se desborda a una segunda pagina real.
+M13  [CERRADO 2026-09-09, ver item M13 mas arriba] Excepcion.tipo_referencia
+     etiqueta cuenta/NIT/renglon de forma aditiva, sin renombrar el campo.
+M12  [CERRADO 2026-09-09, ver item M12 mas arriba] Verificado: C1 ya actua
+     como red de seguridad si el cuadro C se desborda a una pagina real.
 3.1  El caso 9999 (mal clasificado DENTRO de la misma clase de tarifa) sigue
      sin detectarse por control deterministico. Es lo previsto: lo cubren C7
      atestado y la capa IA.
