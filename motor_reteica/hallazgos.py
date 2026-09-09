@@ -28,6 +28,7 @@ class Informe:
     controles_en_falla: tuple
     controles_no_ejecutados: tuple
     controles_no_aplicables: tuple
+    controles_atestados: tuple = ()
 
 
 def consolidar(resultados) -> Informe:
@@ -40,8 +41,14 @@ def consolidar(resultados) -> Informe:
         if r.estado is Estado.NO_EJECUTADO and r.aplica)
     no_aplicables = tuple(
         r.codigo for r in resultados if not r.aplica)
+    atestados = tuple(r.codigo for r in resultados
+                      if r.estado is Estado.ATESTADO)
     impacto = sum((e.impacto_pesos for e in excepciones), Decimal("0"))
-    limpio = not en_falla and not no_ejecutados
+    # X1/5.3: un control ATESTADO se sostiene sobre el testimonio del auditor,
+    # no sobre una fuente externa. No impide trabajar, pero impide concluir
+    # limpio: el papel no puede dar a entender que hubo verificacion
+    # independiente donde solo hubo testimonio.
+    limpio = not en_falla and not no_ejecutados and not atestados
 
     partes = []
     if limpio:
@@ -53,6 +60,10 @@ def consolidar(resultados) -> Informe:
             partes.append(
                 "Los siguientes controles presentan excepciones: %s."
                 % ", ".join(en_falla))
+        if atestados:
+            partes.append(
+                "Los siguientes controles se sustentan en la atestacion del "
+                "auditor y no en una fuente externa: %s." % ", ".join(atestados))
         if no_ejecutados:
             partes.append(
                 "Los siguientes controles NO se ejecutaron por falta de "
@@ -85,4 +96,5 @@ def consolidar(resultados) -> Informe:
         controles_en_falla=en_falla,
         controles_no_ejecutados=no_ejecutados,
         controles_no_aplicables=no_aplicables,
+        controles_atestados=atestados,
     )

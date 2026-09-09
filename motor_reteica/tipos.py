@@ -7,11 +7,18 @@ from enum import Enum
 
 
 class Estado(Enum):
-    """Tres estados, no dos. La ausencia de un insumo no es un OK."""
+    """Cuatro estados. La ausencia de un insumo no es un OK.
+
+    ATESTADO (X1) es el cuarto: cuando el auditor pone su nombre respaldando
+    un dato que el motor no pudo verificar contra una fuente externa. No es OK
+    -- nadie recalculo contra el estatuto -- ni NO_EJECUTADO -- si hubo
+    procedimiento. El papel debe decir cual de los cuatro fue.
+    """
 
     OK = "OK"
     FALLA = "FALLA"
     NO_EJECUTADO = "NO EJECUTADO"
+    ATESTADO = "ATESTADO"
 
 
 class Severidad(Enum):

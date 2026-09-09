@@ -40,6 +40,7 @@ def c2_balance_vs_auxiliar(saldos, lineas) -> ResultadoControl:
     if saldos is None:
         return _no_ejecutado("C2", nombre, "el balance de prueba")
 
+
     por_cuenta = defaultdict(lambda: _CERO)
     for linea in lineas:
         por_cuenta[linea.cuenta] += linea.retencion
@@ -63,6 +64,7 @@ def c3_auxiliar_vs_erp(lineas, filas_erp) -> ResultadoControl:
     nombre = "Auxiliar 2368 vs reporte de retenciones del ERP (por tercero)"
     if filas_erp is None:
         return _no_ejecutado("C3", nombre, "el reporte de retenciones del ERP")
+
 
     auxiliar = defaultdict(lambda: _CERO)
     for linea in lineas:
@@ -191,16 +193,27 @@ def c4_recalculo(reconstruccion) -> ResultadoControl:
                      % len(reconstruccion.por_tercero))
 
 
-def c7_tarifas_vs_estatuto(borrador, municipio) -> ResultadoControl:
-    """Tarifas contra el Acuerdo municipal, jamas contra el borrador."""
+def c7_tarifas_vs_estatuto(borrador, municipio, atestacion=None) -> ResultadoControl:
+    """Tarifas contra el Acuerdo municipal, jamas contra el borrador.
+
+    X1: mientras no se cargue el Acuerdo del municipio, el auditor puede
+    entrar como TESTIGO y declarar la tarifa con su procedencia. Eso NO
+    produce OK: produce ATESTADO, que es un estado propio. El papel debe poder
+    decir si hubo recalculo contra el estatuto o solo testimonio.
+    """
     nombre = "Tarifa aplicada vs tabla de tarifas del municipio"
-    if municipio.estado_tarifas == "PENDIENTE_VALIDACION_ESTATUTO":
+    atestadas = atestacion.tarifas if atestacion else {}
+
+    if municipio.estado_tarifas == "PENDIENTE_VALIDACION_ESTATUTO" and not atestadas:
         return ResultadoControl(
             codigo="C7", nombre=nombre, estado=Estado.NO_EJECUTADO,
             detalle="no se ejecuto: la tabla de tarifas de %s esta en estado "
-                    "PENDIENTE_VALIDACION_ESTATUTO; sin el Acuerdo municipal "
-                    "vigente el cruce solo probaria consistencia interna"
-                    % municipio.nombre)
+                    "PENDIENTE_VALIDACION_ESTATUTO y nadie atesto las tarifas; "
+                    "sin el Acuerdo municipal vigente el cruce solo probaria "
+                    "consistencia interna" % municipio.nombre)
+
+    if atestadas:
+        return _c7_contra_atestacion(borrador, atestacion, nombre)
 
     excepciones = []
     for actividad in borrador.actividades:
@@ -222,6 +235,45 @@ def c7_tarifas_vs_estatuto(borrador, municipio) -> ResultadoControl:
     return _resolver("C7", nombre, excepciones,
                      "%d actividad(es) contra %s"
                      % (len(borrador.actividades), municipio.estado_tarifas))
+
+
+def _c7_contra_atestacion(borrador, atestacion, nombre) -> ResultadoControl:
+    """Confronta el borrador contra lo que el auditor atesto, no contra el
+    propio borrador. Si el auditor no atesto una actividad que el borrador
+    declara, eso es una excepcion: quedo sin respaldo."""
+    excepciones = []
+    for actividad in borrador.actividades:
+        atestada = atestacion.tarifas.get(actividad.codigo)
+        if atestada is None:
+            excepciones.append(Excepcion(
+                severidad=Severidad.HALLAZGO, control="C7",
+                descripcion="la actividad %s aparece en el borrador y nadie "
+                            "atesto su tarifa: queda sin respaldo"
+                            % actividad.codigo,
+                renglon=actividad.codigo))
+        elif atestada.tarifa != actividad.tarifa:
+            excepciones.append(Excepcion(
+                severidad=Severidad.HALLAZGO, control="C7",
+                descripcion="actividad %s: el borrador aplica %s y el auditor "
+                            "atesto %s (%s)"
+                            % (actividad.codigo, actividad.tarifa,
+                               atestada.tarifa, atestada.descripcion()),
+                renglon=actividad.codigo,
+                impacto_pesos=abs(actividad.base
+                                  * (atestada.tarifa - actividad.tarifa))))
+
+    detalle = ("%d actividad(es) contra la atestacion de %s. LIMITE: esto NO "
+               "es un recalculo independiente contra el estatuto; es el "
+               "testimonio del auditor, y es mas debil que cargar el Acuerdo."
+               % (len(borrador.actividades), atestacion.firma()))
+
+    if excepciones:
+        return ResultadoControl(
+            codigo="C7", nombre=nombre, estado=Estado.FALLA,
+            detalle="%d excepcion(es); %s" % (len(excepciones), detalle),
+            excepciones=tuple(excepciones))
+    return ResultadoControl(codigo="C7", nombre=nombre,
+                            estado=Estado.ATESTADO, detalle=detalle)
 
 
 def c10_redondeo(borrador, reconstruccion) -> ResultadoControl:
@@ -395,6 +447,11 @@ def c6_clasificacion_por_linea(reconstruccion, facturas, mapa_actividad,
 def c8_corte(lineas, periodo) -> ResultadoControl:
     """Corte sobre el auxiliar.
 
+    M1: el corte real es la FECHA DE CONTABILIZACION -- es la que define en
+    que periodo entra el registro. Antes se miraba fecha_documento, que es
+    otra cosa. M2: una linea contabilizada fuera del periodo ya NO aborta la
+    corrida (eso lo hacia C0); es una excepcion de corte, que es lo de aqui.
+
     El desfase entre la factura fisica y el registro contable NO es visible
     aqui: lo detecta C11 contra el PDF.
     """
@@ -403,16 +460,26 @@ def c8_corte(lineas, periodo) -> ResultadoControl:
 
     excepciones = []
     for linea in lineas:
-        if (linea.fecha_documento.year, linea.fecha_documento.month) != (anio, mes):
+        contabilizacion = linea.fecha_contabilizacion
+        if (contabilizacion.year, contabilizacion.month) != (anio, mes):
+            excepciones.append(Excepcion(
+                severidad=Severidad.HALLAZGO, control="C8",
+                descripcion="%s: contabilizada el %s, fuera del periodo %s"
+                            % (linea.referencia, contabilizacion, periodo),
+                renglon=linea.cuenta, impacto_pesos=linea.retencion))
+        elif (linea.fecha_documento.year,
+              linea.fecha_documento.month) != (anio, mes):
             excepciones.append(Excepcion(
                 severidad=Severidad.OBSERVACION, control="C8",
-                descripcion="%s: fecha de documento %s, fuera de %s; valida si "
-                            "la retencion se causo en el abono en cuenta"
+                descripcion="%s: fecha de documento %s, de un periodo anterior "
+                            "a %s; valida si la retencion se causo en el abono "
+                            "en cuenta, pero debe quedar escrito"
                             % (linea.referencia, linea.fecha_documento, periodo),
                 renglon=linea.cuenta))
 
     return _resolver("C8", nombre, excepciones,
-                     "%d linea(s) dentro del periodo %s" % (len(lineas), periodo))
+                     "%d linea(s) contabilizadas dentro del periodo %s"
+                     % (len(lineas), periodo))
 
 
 def c11_cotejo_facturas(lineas, facturas, municipio) -> ResultadoControl:
@@ -544,7 +611,8 @@ def c12_continuidad(saldo_mes_anterior, pago_mes_anterior) -> ResultadoControl:
     return _resolver("C12", nombre, excepciones, "saldo y pago coinciden")
 
 
-def c13_formales(borrador, municipio, insumos_obtenidos) -> ResultadoControl:
+def c13_formales(borrador, municipio, insumos_obtenidos,
+                 candidatas_sin_declarar=()) -> ResultadoControl:
     nombre = "Requisitos formales y trazabilidad de insumos"
     excepciones = []
 
@@ -554,10 +622,25 @@ def c13_formales(borrador, municipio, insumos_obtenidos) -> ResultadoControl:
                 severidad=Severidad.AVISO, control="C13",
                 descripcion="insumo no obtenido: %s" % descripcion))
 
-    if not borrador.firma_revisor_fiscal:
+    # M11: la cuenta se excluyo por su NATURALEZA detectada en el balance, no
+    # por una lista fija. Esa determinacion se toma de los datos, pero la
+    # decision es del auditor: mientras no la declare, queda dicho en el papel.
+    for cuenta in sorted(candidatas_sin_declarar):
         excepciones.append(Excepcion(
-            severidad=Severidad.HALLAZGO, control="C13",
-            descripcion="el borrador no trae firma de revisor fiscal"))
+            severidad=Severidad.AVISO, control="C13",
+            descripcion="la cuenta %s tiene naturaleza debito y se trato como "
+                        "contrapartida de pago (excluida de los cruces) por su "
+                        "saldo, no por declaracion del auditor; conviene "
+                        "atestarla" % cuenta,
+            renglon=cuenta))
+
+    # M10: se quito el chequeo de firma de revisor fiscal. El objeto de prueba
+    # es un BORRADOR que la firma todavia no ha firmado, asi que verificar ahi
+    # su propia firma no tiene sentido en esta etapa. Ademas el chequeo era
+    # silencioso: buscaba "FRMA_RVSR_FSCL", que es una ETIQUETA IMPRESA del
+    # formulario en blanco, y devolvia True siempre.
+    # Si algun dia se quiere verificar la firma, corresponde al momento de la
+    # PRESENTACION de la declaracion, no a la revision del borrador.
 
     try:
         vencimiento = municipio.vencimiento(borrador.periodo)

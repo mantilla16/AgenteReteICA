@@ -7,8 +7,23 @@ from motor_reteica.tipos import Estado, Severidad, LineaAuxiliar, ResultadoContr
 from motor_reteica.parametros.tolerancias import TOLERANCIAS
 
 
-def test_estados_son_tres():
-    assert {e.value for e in Estado} == {"OK", "FALLA", "NO EJECUTADO"}
+def test_estados_son_cuatro():
+    """X1 agrega ATESTADO como cuarto estado, deliberadamente.
+
+    Cuando el auditor pone su nombre respaldando una tarifa que el motor no
+    pudo verificar contra el estatuto, eso no es OK -- nadie recalculo -- ni
+    NO EJECUTADO -- si hubo procedimiento.
+    """
+    assert {e.value for e in Estado} == {"OK", "FALLA", "NO EJECUTADO",
+                                         "ATESTADO"}
+
+
+def test_atestado_no_es_ok():
+    """Si ATESTADO contara como OK, el papel diria que hubo verificacion
+    independiente donde solo hubo testimonio."""
+    atestado = ResultadoControl(codigo="C7", nombre="x",
+                                estado=Estado.ATESTADO, detalle="")
+    assert atestado.paso is False
 
 
 def test_linea_auxiliar_exige_decimal():

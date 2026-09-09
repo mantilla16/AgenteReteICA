@@ -18,11 +18,12 @@ from decimal import Decimal
 from pathlib import Path
 
 from motor_reteica import controles
+from motor_reteica.atestacion import leer_atestacion
 from motor_reteica.hallazgos import consolidar
 from motor_reteica.identidad import (IdentidadIncompatible, huella,
                                      verificar_identidad, verificar_tipo_documento)
 from motor_reteica.ingesta.auxiliar import leer_auxiliar
-from motor_reteica.ingesta.balance import leer_balance
+from motor_reteica.ingesta.balance import DEBITO, leer_balance, leer_naturalezas
 from motor_reteica.ingesta.borrador_pdf import leer_borrador
 from motor_reteica.ingesta.formato_historico import (leer_formato_historico,
                                                      periodo_anterior)
@@ -61,6 +62,7 @@ class ContextoRevision:
     total_auxiliar: Decimal
     total_erp: Decimal
     manifiesto: object = None
+    atestacion: object = None
 
 
 _TOLERANCIA_REDONDEO = Decimal("1000")
@@ -207,9 +209,26 @@ def revisar(carpeta, nit, periodo, municipio) -> ContextoRevision:
         if rol in presentes:
             verificar_tipo_documento(rol, rutas[rol])
 
+    # X1 y M11: lo que el motor no puede decidir solo y el auditor declara.
+    # Vacia no significa "todo bien": significa que nadie atesto nada.
+    atestacion = leer_atestacion(carpeta)
+
+    # M11: el motor detecta las candidatas por la naturaleza del saldo; el
+    # auditor decide. Una candidata sin declarar bloquea C2 y C3.
+    naturalezas = (leer_naturalezas(rutas["balance"])
+                   if "balance" in presentes else {})
+    candidatas = {cuenta for cuenta, naturaleza in naturalezas.items()
+                  if naturaleza == DEBITO}
+    candidatas_sin_declarar = candidatas - set(atestacion.cuentas)
+    # Lo atestado manda; lo detectado como debito y no declarado se excluye
+    # igual -- excluir por naturaleza es una determinacion sobre los datos, no
+    # una adivinanza -- y C13 lo deja escrito.
+    excluidas_efectivas = atestacion.cuentas_excluidas() | candidatas_sin_declarar
+
     borrador = leer_borrador(rutas["borrador"])
     lineas = leer_auxiliar(rutas["auxiliar"])
-    saldos = leer_balance(rutas["balance"]) if "balance" in presentes else None
+    saldos = (leer_balance(rutas["balance"], excluidas_efectivas)
+              if "balance" in presentes else None)
     filas_erp = leer_sap_retenciones(rutas["erp"]) if "erp" in presentes else None
 
     # C15 y la mitad legible de C12. El formato historico del cliente trae una
@@ -221,6 +240,8 @@ def revisar(carpeta, nit, periodo, municipio) -> ContextoRevision:
     # El PAGO no esta en el formato historico: exige el comprobante, que el
     # cliente no entrega. Sin el, C12 es NO EJECUTADO -- nunca OK.
     pago_anterior = None
+
+
 
     facturas = [leer_factura(p, nit_cliente=nit) for p in rutas_facturas]
     if facturas:
@@ -239,13 +260,14 @@ def revisar(carpeta, nit, periodo, municipio) -> ContextoRevision:
         controles.c4_recalculo(recon),
         controles.c5_coherencia_cuenta_codigo(lineas, filas_erp, municipio),
         controles.c6_clasificacion_por_linea(recon, facturas, mapa, municipio),
-        controles.c7_tarifas_vs_estatuto(borrador, municipio),
+        controles.c7_tarifas_vs_estatuto(borrador, municipio, atestacion),
         controles.c8_corte(lineas, periodo),
         controles.c9_reconstruccion_vs_borrador(recon, borrador, mapa),
         controles.c10_redondeo(borrador, recon),
         controles.c11_cotejo_facturas(lineas, facturas, municipio),
         controles.c12_continuidad(saldo_anterior, pago_anterior),
-        controles.c13_formales(borrador, municipio, presentes),
+        controles.c13_formales(borrador, municipio, presentes,
+                               candidatas_sin_declarar),
         controles.c14_compras_vs_servicios(recon, municipio),
         controles.c15_formato_historico(borrador, historico, periodo),
     ]
@@ -268,4 +290,5 @@ def revisar(carpeta, nit, periodo, municipio) -> ContextoRevision:
         total_auxiliar=sum((l.retencion for l in lineas), Decimal("0")),
         total_erp=sum((f.retencion for f in (filas_erp or [])), Decimal("0")),
         manifiesto=manifiesto,
+        atestacion=atestacion,
     )

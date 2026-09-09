@@ -14,9 +14,17 @@ def test_puc_es_constante():
     assert puc.CUENTA_RETEICA == "2368"
 
 
-def test_cuenta_de_pago_esta_excluida():
-    assert "2368010090" in puc.CUENTAS_EXCLUIDAS
-    assert not puc.es_cuenta_reteica("2368010090")
+def test_puc_no_trae_cuentas_de_ningun_cliente(): 
+    """M11: 2368010090 es la subcuenta de contrapartida de TERLICA en SAP, no
+    una constante del PUC. En otro cliente tendria otro numero y pasaria como
+    retencion practicada, inflando todos los cruces.
+
+    La exclusion ahora se determina por la NATURALEZA del saldo en el balance
+    (ver ingesta/balance.leer_naturalezas) y la declara el auditor.
+    """
+    assert puc.CUENTAS_EXCLUIDAS == frozenset()
+    assert puc.es_cuenta_reteica("2368010090")           # ya no se excluye aqui
+    assert not puc.es_cuenta_reteica("2368010090", {"2368010090"})
     assert puc.es_cuenta_reteica("2368010010")
     assert not puc.es_cuenta_reteica("2365050100")
 

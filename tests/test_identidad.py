@@ -29,14 +29,40 @@ def test_nit_distinto_detiene_el_proceso():
         verificar_identidad(BORRADOR, LINEAS, "900000000", "2026-07")
 
 
-def test_auxiliar_fuera_de_periodo_detiene_el_proceso():
+def test_auxiliar_fuera_de_periodo_ya_no_detiene_el_proceso():
+    """M2, ajuste deliberado del spec seccion 6.
+
+    Un registro contabilizado tarde es asunto de CORTE (C8), no de identidad.
+    Abortar impedia generar el papel en una situacion perfectamente legitima.
+    C0 lo deja escrito en su detalle y remite a C8.
+    """
     intrusa = LineaAuxiliar(
         cuenta="2368010010", nit="800193573", tercero="X",
         fecha_documento=date(2026, 5, 1), fecha_contabilizacion=date(2026, 5, 31),
         referencia="X", documento="X", concepto="X", retencion=Decimal("100"),
     )
-    with pytest.raises(IdentidadIncompatible):
-        verificar_identidad(BORRADOR, list(LINEAS) + [intrusa], "819002433", "2026-07")
+    resultado = verificar_identidad(BORRADOR, list(LINEAS) + [intrusa],
+                                    "819002433", "2026-07")
+    assert "fuera del periodo" in resultado.detalle
+    assert "C8" in resultado.detalle
+
+
+def test_c8_es_quien_reporta_la_linea_tardia():
+    """Lo que C0 dejo de abortar tiene que aparecer en otro lado, o el cambio
+    seria una perdida de cobertura disfrazada de mejora."""
+    from motor_reteica.controles import c8_corte
+    from motor_reteica.tipos import Estado, Severidad
+    intrusa = LineaAuxiliar(
+        cuenta="2368010010", nit="800193573", tercero="X",
+        fecha_documento=date(2026, 5, 1), fecha_contabilizacion=date(2026, 5, 31),
+        referencia="TARDIA", documento="X", concepto="X",
+        retencion=Decimal("100"),
+    )
+    resultado = c8_corte(list(LINEAS) + [intrusa], "2026-07")
+    assert resultado.estado is Estado.FALLA
+    grave = next(e for e in resultado.excepciones if "TARDIA" in e.descripcion)
+    assert grave.severidad is Severidad.HALLAZGO
+    assert grave.impacto_pesos == Decimal("100")
 
 
 def test_el_detalle_deja_constancia_de_la_identidad():

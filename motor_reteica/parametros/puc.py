@@ -8,10 +8,13 @@ CUENTAS_RETENCION = {
 
 CUENTA_RETEICA = "2368"
 
-# 2368010090 "Ret. Ffe ICA a pagar" es la contrapartida de pago (saldo debito),
-# no una retencion practicada. Incluirla infla todos los cruces.
-CUENTAS_EXCLUIDAS = {"2368010090"}
+# M11: aqui NO va ninguna cuenta concreta. "2368010090" es la subcuenta de
+# contrapartida de TERLICA en SAP, no una constante del PUC: en otro cliente
+# tendria otro numero, pasaria como retencion practicada e inflaria todos los
+# cruces. La exclusion la declara el auditor (ver atestacion.py) sobre las
+# candidatas que el motor detecta por la naturaleza del saldo.
+CUENTAS_EXCLUIDAS = frozenset()
 
 
-def es_cuenta_reteica(cuenta: str) -> bool:
-    return cuenta.startswith(CUENTA_RETEICA) and cuenta not in CUENTAS_EXCLUIDAS
+def es_cuenta_reteica(cuenta: str, excluidas=()) -> bool:
+    return cuenta.startswith(CUENTA_RETEICA) and cuenta not in set(excluidas)

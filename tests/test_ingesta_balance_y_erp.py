@@ -13,9 +13,23 @@ def test_balance_toma_el_movimiento_del_periodo_no_el_acumulado():
     assert saldos["2368010010"] == Decimal("438243")
 
 
-def test_balance_excluye_la_cuenta_de_pago():
-    """2368010090 es contrapartida de pago con saldo debito de 38 millones."""
-    assert "2368010090" not in leer_balance(BASE / "balance.xlsx")
+def test_balance_excluye_la_cuenta_de_pago_cuando_se_le_indica():
+    """2368010090 es contrapartida de pago con saldo debito de 38 millones.
+
+    M11: ya no se excluye por una lista fija en puc.py -- ese numero es de
+    TERLICA, no del PUC. El llamador pasa las cuentas a excluir.
+    """
+    assert "2368010090" not in leer_balance(BASE / "balance.xlsx",
+                                            {"2368010090"})
+
+
+def test_la_contrapartida_se_detecta_por_la_naturaleza_del_saldo():
+    """El motor DETECTA la candidata; el auditor DECIDE (atestacion)."""
+    from motor_reteica.ingesta.balance import CREDITO, DEBITO, leer_naturalezas
+    naturalezas = leer_naturalezas(BASE / "balance.xlsx")
+    assert naturalezas["2368010090"] == DEBITO
+    assert {c for c, n in naturalezas.items() if n == DEBITO} == {"2368010090"}
+    assert naturalezas["2368010010"] == CREDITO
 
 
 def test_balance_incluye_cuentas_sin_movimiento():

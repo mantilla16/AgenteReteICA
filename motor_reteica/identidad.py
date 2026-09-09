@@ -66,20 +66,25 @@ def verificar_identidad(borrador, lineas, nit_esperado: str,
             "el borrador es del periodo %s y se esperaba %s"
             % (borrador.periodo, periodo_esperado))
 
+    # M2 (ajuste deliberado del spec seccion 6): C0 verifica IDENTIDAD --
+    # misma entidad, mismo periodo, mismo tipo de documento -- y ya no aborta
+    # por una linea contabilizada tarde. Un registro tardio legitimo es asunto
+    # de CORTE, que es lo de C8, y abortar impedia generar el papel en una
+    # situacion perfectamente normal. El aborto se conserva para lo que si es
+    # identidad: NIT distinto, periodo distinto, documento de otro tipo.
     anio, mes = (int(parte) for parte in periodo_esperado.split("-"))
     fuera = [l for l in lineas
              if (l.fecha_contabilizacion.year,
                  l.fecha_contabilizacion.month) != (anio, mes)]
-    if fuera:
-        raise IdentidadIncompatible(
-            "%d linea(s) del auxiliar estan contabilizadas fuera de %s: %s"
-            % (len(fuera), periodo_esperado,
-               ", ".join(sorted({l.referencia for l in fuera}))))
 
     return ResultadoControl(
         codigo="C0",
         nombre="Identidad de las fuentes",
         estado=Estado.OK,
-        detalle="NIT %s, periodo %s, municipio %s, %d linea(s) de auxiliar"
-                % (borrador.nit, borrador.periodo, borrador.municipio, len(lineas)),
+        detalle="NIT %s, periodo %s, municipio %s, %d linea(s) de auxiliar%s"
+                % (borrador.nit, borrador.periodo, borrador.municipio,
+                   len(lineas),
+                   "" if not fuera else
+                   "; %d contabilizada(s) fuera del periodo, las reporta C8"
+                   % len(fuera)),
     )
