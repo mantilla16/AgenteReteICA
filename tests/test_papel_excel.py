@@ -136,6 +136,52 @@ def test_excepciones_declara_el_tipo_de_referencia(libro):
     assert "Renglon" in texto or "Cuenta" in texto or "NIT" in texto
 
 
+def test_la_columna_descripcion_es_ancha_y_ajusta_texto(libro):
+    """La columna C es la unica con prosa completa: debe ser la mas ancha
+    de la hoja y llevar wrap_text, o el texto se sale sin partirse."""
+    hoja = libro["Excepciones"]
+    assert hoja.column_dimensions["C"].width >= 100
+    fila_con_dato = next(
+        f for f in hoja.iter_rows(min_row=1)
+        if f[2].value and f[2].value not in ("DESCRIPCION", "Sin excepciones"))
+    assert fila_con_dato[2].alignment.wrap_text is True
+
+
+def test_excepciones_de_ia_van_en_tabla_aparte_debajo(tmp_path):
+    """Las excepciones de IA-1/IA-3 no se mezclan con las de C0..C15: van en
+    su propia tabla, mas abajo en la misma hoja."""
+    import sys
+    sys.path.insert(0, str(Path(__file__).parent))
+    from test_ia import ClienteFalso, _contradiccion
+
+    ctx_con_ia = revisar(BASE, nit="819002433", periodo="2026-07",
+                         municipio=MUNICIPIO,
+                         cliente_ia=ClienteFalso(_contradiccion(sugerida="7490")))
+    salida = tmp_path / "con_ia.xlsx"
+    generar_papel(salida, ctx_con_ia)
+    hoja = openpyxl.load_workbook(salida)["Excepciones"]
+
+    filas_con_titulo = [f for f in hoja.iter_rows(min_row=1)
+                        if f[0].value and "EXCEPCIONES" in str(f[0].value)]
+    titulos = [f[0].value for f in filas_con_titulo]
+    assert "EXCEPCIONES DE CONTROLES" in titulos
+    assert any("REVISION INTELIGENTE" in t for t in titulos)
+
+    fila_controles = filas_con_titulo[0][0].row
+    fila_ia = next(f[0].row for f in filas_con_titulo
+                   if "REVISION INTELIGENTE" in str(f[0].value))
+    assert fila_ia > fila_controles, "la tabla de IA debe ir DEBAJO"
+
+    # Ninguna fila de datos de IA-1/IA-3 aparece antes de su propio titulo,
+    # y ninguna fila de control C0..C15 aparece despues de el.
+    for f in hoja.iter_rows(min_row=1):
+        control = f[1].value
+        if control and str(control).startswith("IA-"):
+            assert f[0].row > fila_ia
+        elif control and str(control).startswith("C") and control != "CONTROL":
+            assert f[0].row < fila_ia
+
+
 def test_parametros_declara_que_no_hubo_manifiesto_para_esta_corrida(libro):
     """1.4.b: la fixture corre en modo legado (sin manifiesto.json)."""
     texto = _texto(libro["Parametros"])

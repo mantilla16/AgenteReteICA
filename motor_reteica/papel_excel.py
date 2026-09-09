@@ -193,25 +193,57 @@ def _hoja_cruces(libro, ctx):
 _ETIQUETA_TIPO_REF = {"cuenta": "Cuenta", "nit": "NIT", "renglon": "Renglon", "": ""}
 
 
-def _hoja_excepciones(libro, ctx):
-    hoja = libro.create_sheet("Excepciones")
-    for letra, ancho in zip("ABCDEF", (16, 10, 100, 12, 14, 16)):
-        hoja.column_dimensions[letra].width = ancho
+_ENCABEZADOS_EXCEPCIONES = [
+    # M13: la columna RENGLON trae una cuenta contable, un NIT o un renglon
+    # real del formulario segun el control. TIPO DE REF. dice cual de los
+    # tres es, para no leerla como si siempre fuera lo mismo.
+    "SEVERIDAD", "CONTROL", "DESCRIPCION", "TIPO DE REF.", "RENGLON",
+    "IMPACTO $"]
 
-    fila = _titulo(hoja, 1, "EXCEPCIONES", ancho=6)
-    fila = _encabezados(hoja, fila, [
-        # M13: la columna RENGLON trae una cuenta contable, un NIT o un
-        # renglon real del formulario segun el control. TIPO DE REF. dice
-        # cual de los tres es, para no leerla como si siempre fuera lo mismo.
-        "SEVERIDAD", "CONTROL", "DESCRIPCION", "TIPO DE REF.", "RENGLON",
-        "IMPACTO $"])
-    for excepcion in ctx.informe.excepciones_ordenadas:
+
+def _tabla_excepciones(hoja, fila, excepciones):
+    """Una fila por excepcion, con la DESCRIPCION en ajuste de texto.
+
+    La columna C (DESCRIPCION) es la mas ancha de la hoja y con
+    wrap_text: son las unicas celdas donde va prosa completa, y antes se
+    salian del ancho de columna sin partirse en varias lineas.
+    """
+    for excepcion in excepciones:
+        fila_actual = fila
         fila = _fila(hoja, fila, [
             excepcion.severidad.value, excepcion.control, excepcion.descripcion,
             _ETIQUETA_TIPO_REF.get(excepcion.tipo_referencia, excepcion.tipo_referencia),
             excepcion.renglon, float(excepcion.impacto_pesos)])
-    if not ctx.informe.excepciones_ordenadas:
+        celda = hoja.cell(row=fila_actual, column=3)
+        celda.alignment = Alignment(wrap_text=True, vertical="top")
+    if not excepciones:
         fila = _fila(hoja, fila, ["Sin excepciones"])
+    return fila
+
+
+def _hoja_excepciones(libro, ctx):
+    hoja = libro.create_sheet("Excepciones")
+    for letra, ancho in zip("ABCDEF", (16, 10, 130, 12, 14, 16)):
+        hoja.column_dimensions[letra].width = ancho
+
+    # Las excepciones de la IA (controles IA-1, IA-3) van en su PROPIA tabla,
+    # debajo de las de los controles deterministicos C0..C15: son evidencia
+    # de otra naturaleza (D7 -- carril propio) y mezclarlas en una sola lista
+    # dificultaba distinguir cual es cual de un vistazo.
+    todas = ctx.informe.excepciones_ordenadas
+    deterministas = [e for e in todas if not e.control.startswith("IA-")]
+    de_ia = [e for e in todas if e.control.startswith("IA-")]
+
+    fila = _titulo(hoja, 1, "EXCEPCIONES DE CONTROLES", ancho=6)
+    fila = _encabezados(hoja, fila, _ENCABEZADOS_EXCEPCIONES)
+    fila = _tabla_excepciones(hoja, fila, deterministas)
+
+    fila += 1
+    fila = _titulo(hoja, fila, "EXCEPCIONES DE LA REVISION INTELIGENTE (IA)",
+                   ancho=6)
+    fila = _encabezados(hoja, fila, _ENCABEZADOS_EXCEPCIONES)
+    fila = _tabla_excepciones(hoja, fila, de_ia)
+
     _nota_alcance(hoja, fila)
 
 
