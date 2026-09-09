@@ -9,8 +9,10 @@ from pathlib import Path
 import openpyxl
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
+import motor_reteica
 from motor_reteica.hallazgos import LIMITACION_INTEGRIDAD
 from motor_reteica.tipos import Estado
+from motor_reteica.version import huella_del_codigo
 
 AZUL = "001871"
 GRIS = "F2F2F2"
@@ -82,6 +84,10 @@ def _hoja_caratula(libro, ctx):
         ("NUMERO DE FORMULARIO", ctx.borrador.numero_formulario),
         ("FIRMA DE REVISOR FISCAL EN EL BORRADOR",
          "Si" if ctx.borrador.firma_revisor_fiscal else "No"),
+        # M7: sin esto el papel no se puede reproducir. La huella lleva
+        # '+sucio' si se genero sobre codigo sin commitear.
+        ("VERSION DEL MOTOR", motor_reteica.__version__),
+        ("HUELLA DEL CODIGO", huella_del_codigo()),
     ]
     for etiqueta, valor in datos:
         fila = _fila(hoja, fila, [etiqueta, valor])
