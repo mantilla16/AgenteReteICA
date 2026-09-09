@@ -1056,3 +1056,93 @@ X1 y 3.1 resueltos por diseno, M1..M13 con arreglo definido.
 Todo el backlog es ejecutable.
 Nada de esto esta implementado: esta sesion fue de diagnostico y diseno, no se
 toco una linea del motor.
+
+
+================================================================================
+================================================================================
+CIERRE DE LA SESION DE IMPLEMENTACION -- 2026-09-09 (continuacion)
+================================================================================
+================================================================================
+
+Todo el backlog quedo IMPLEMENTADO salvo lo que topa con el muro.
+283 pruebas verdes (linea base 151 + 132 nuevas). Anclas de julio 2026 exactas.
+tests/test_anclas_julio_2026.py, tests/test_mutacion.py y tests/fixtures/**
+intactos (git diff vacio).
+
+HECHO EN ESTA SESION
+--------------------
+M7(a)  El motor NO estaba en el repositorio: los commits previos solo
+       incluyeron archivos modificados. Se rastreo la linea base (71bf74f).
+M6     Codigo de salida del CLI segun la conclusion (0/1/2/3). exit 3 real.
+M7(b)(c) __version__ 1.0.0 y huella del codigo en la caratula, con sufijo
+       +sucio si el arbol no esta commiteado.
+2.1    C11 verifica base x tarifa == retencion. 3 de 3 facturas verificadas,
+       incluida FE338057 (11.970 = 11.970).
+M8     C11 declara cobertura en vez de "N facturas cotejadas".
+3.3/3.4 Unidad de cruce = grupo (NIT, tarifa). ERP agregado, no sobrescrito.
+3.2    Varios grupos por renglon; el renglon ya no se consume. Se acabo el
+       hallazgo falso.
+3.1.bis Capa 1 (el mapa nunca cruza clases de tarifa) y capa 3 (C9 declara que
+       verifico montos pero NO el reparto). El mapa viaja en la Reconstruccion.
+3.5    Pruebas estructurales: 40 lineas, 20 grupos, dos por tercero, dos
+       clases de tarifa.
+C6     Simetrico, y _naturaleza deja de resolver empates por orden de chequeo.
+4.1    C12 (pago, sigue bloqueado) + C15 nuevo (borrador vs formato historico).
+       19 periodos leidos con los nombres de hoja sucios normalizados.
+X1     atestacion.py, mecanismo COMPARTIDO. Estado ATESTADO. Exige procedencia.
+M11    puc.py sin cuentas de cliente; contrapartida detectada por naturaleza.
+M10    Control de firma eliminado.
+M1/M2  C8 mira fecha_contabilizacion; C0 ya no aborta por linea tardia.
+5.x    IA con carril propio (IA-1, IA-3), semaforo y hoja Notas al frente.
+M3/M4/M9/M14 menores.
+
+BLOQUEADO POR EL MURO (no se simulo nada)
+-----------------------------------------
+X1 en la practica  la atestacion existe como mecanismo y esta probada, pero
+                   NADIE HA ATESTADO todavia. Requiere una persona. Mientras
+                   tanto C7 sigue NO EJECUTADO en la corrida real.
+X2 balance         el cliente no lo entrega; C2 NO EJECUTADO.
+C12 pago           no hay comprobante en la carpeta.
+IA-2 / 5.1         lectura por imagen: requiere llave y, para FE338057, OCR
+                   (P2 cerro que no se construye).
+Acuerdo municipal  documento externo.
+
+CORRECCION AL DISENO QUE HAY QUE CONOCER
+----------------------------------------
+D9 pedia "temperatura en cero" para la IA. El parametro `temperature` FUE
+ELIMINADO en los modelos actuales de Anthropic: enviarlo a claude-opus-5
+devuelve HTTP 400. No se ignora, rechaza la peticion.
+La reproducibilidad se sostiene sobre: prompt VERSIONADO con hash estampado,
+id exacto del modelo, respuesta cruda archivable, y la regla que de verdad
+importa -- ningun estado de control determinista depende de una salida de IA
+no verificada. Probado: test_la_ia_no_cambia_las_anclas.
+
+DESVIACION DELIBERADA DE LA LETRA DE M11
+----------------------------------------
+M11 decia que una candidata a contrapartida sin declarar debia dejar C2 y C3
+en NO EJECUTADO. Implementado asi, rompe test_mutacion (solo lectura) y deja
+inutilizable cualquier corrida sin atestacion. Excluir por naturaleza
+detectada es una determinacion sobre los datos, no una adivinanza; la falta de
+declaracion queda como AVISO de C13. El protocolo manda: si un cambio rompe un
+archivo de solo lectura, el que esta mal es el cambio.
+
+CORRIDA REAL FINAL (carpeta del cliente, sin renombrar nada, via manifiesto)
+---------------------------------------------------------------------------
+OK            C0 C1 C3 C4 C5 C8 C9 C10 C15
+FALLA         C6, C11, C13
+NO EJECUTADO  C2 (sin balance), C7 (sin atestacion), C12 (sin pago), C14 (n/a)
+Excepciones 6 | impacto 0 | EXIT 3
+Solidez de la revision: [X] ROJO
+Anclas: auxiliar 474.561 = ERP 474.561; base 49.012.569; declarable 474.000
+        vs declarado 474.000.
+
+LO QUE SIGUE ABIERTO
+--------------------
+M13  Excepcion.renglon sigue sobrecargado (cuenta / NIT / renglon). Se dejo
+     como esta: cambiarlo toca todos los controles y la ganancia es cosmetica.
+M12  Verificar que pasa si el cuadro C se desborda a una segunda pagina real.
+3.1  El caso 9999 (mal clasificado DENTRO de la misma clase de tarifa) sigue
+     sin detectarse por control deterministico. Es lo previsto: lo cubren C7
+     atestado y la capa IA.
+PRUEBA CIEGA: el motor sigue sin correrse contra un mes que no haya visto.
+     Conseguir agosto 2026 antes de dar por buena la etapa 3.
