@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from motor_reteica import cli
 from motor_reteica.atestacion import NOMBRE_ARCHIVO, leer_atestacion
 from motor_reteica.parametros.municipios.santa_marta import MUNICIPIO
 from motor_reteica.pipeline import revisar
@@ -32,24 +33,42 @@ def carpeta(tmp_path):
     return destino
 
 
-def test_sin_atestacion_el_motor_escribe_la_plantilla(carpeta):
+def _correr(carpeta, salida):
+    """El circuito real: la plantilla la escribe el CLI, no revisar().
+
+    revisar() no toca la carpeta que analiza: analizar no puede modificar la
+    evidencia. Por eso las fixtures no se ensucian al correr las pruebas.
+    """
+    return cli.main(["--carpeta", str(carpeta), "--nit", "819002433",
+                     "--periodo", "2026-07", "--salida", str(salida)])
+
+
+def test_revisar_no_modifica_la_carpeta_que_analiza(carpeta):
+    """Analizar no puede alterar la evidencia. Ademas es lo que evitaba que
+    las pruebas ensuciaran tests/fixtures, que es de solo lectura."""
+    antes = {p.name for p in carpeta.iterdir()}
     revisar(carpeta, nit="819002433", periodo="2026-07", municipio=MUNICIPIO)
+    assert {p.name for p in carpeta.iterdir()} == antes
+
+
+def test_sin_atestacion_el_motor_escribe_la_plantilla(carpeta, tmp_path):
+    _correr(carpeta, tmp_path / "p.xlsx")
     assert (carpeta / PLANTILLA_ATESTACION).exists(), \
         "el motor debe dejar la plantilla lista para llenar (D2)"
 
 
-def test_la_plantilla_pide_solo_las_actividades_del_borrador(carpeta):
-    revisar(carpeta, nit="819002433", periodo="2026-07", municipio=MUNICIPIO)
+def test_la_plantilla_pide_solo_las_actividades_del_borrador(carpeta, tmp_path):
+    _correr(carpeta, tmp_path / "p.xlsx")
     contenido = json.loads(
         (carpeta / PLANTILLA_ATESTACION).read_text(encoding="utf-8"))
     actividades = sorted(t["actividad"] for t in contenido["tarifas"])
     assert actividades == ["4669", "5224", "7490", "9609", "9903"]
 
 
-def test_la_plantilla_deja_en_blanco_lo_que_debe_declarar_la_persona(carpeta):
+def test_la_plantilla_deja_en_blanco_lo_que_debe_declarar_la_persona(carpeta, tmp_path):
     """El motor no propone tarifas: no las sabe, y sugerirlas anclaria al
     auditor a confirmar un valor que el motor no puede respaldar."""
-    revisar(carpeta, nit="819002433", periodo="2026-07", municipio=MUNICIPIO)
+    _correr(carpeta, tmp_path / "p.xlsx")
     contenido = json.loads(
         (carpeta / PLANTILLA_ATESTACION).read_text(encoding="utf-8"))
     for entrada in contenido["tarifas"]:
@@ -65,13 +84,13 @@ def test_la_plantilla_no_pisa_una_atestacion_ya_hecha(carpeta):
     real.write_text(json.dumps({
         "declarada_por": "analitica@rbcol.co", "fecha": "2026-09-10",
         "tarifas": [], "cuentas": []}), encoding="utf-8")
-    revisar(carpeta, nit="819002433", periodo="2026-07", municipio=MUNICIPIO)
+    _correr(carpeta, carpeta / "p.xlsx")
     assert leer_atestacion(carpeta).declarada_por == "analitica@rbcol.co"
 
 
-def test_con_la_plantilla_completada_c7_queda_atestado(carpeta):
+def test_con_la_plantilla_completada_c7_queda_atestado(carpeta, tmp_path):
     """El circuito completo: el motor pide, la persona llena, C7 cambia."""
-    revisar(carpeta, nit="819002433", periodo="2026-07", municipio=MUNICIPIO)
+    _correr(carpeta, tmp_path / "p.xlsx")
     contenido = json.loads(
         (carpeta / PLANTILLA_ATESTACION).read_text(encoding="utf-8"))
 

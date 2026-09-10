@@ -1,3 +1,4 @@
+import shutil
 from pathlib import Path
 
 import pytest
@@ -51,7 +52,9 @@ def test_una_respuesta_invalida_no_revienta(ctx):
 
 def test_el_cli_corre_extremo_a_extremo(tmp_path, capsys):
     salida = tmp_path / "papel.xlsx"
-    codigo = cli.main(["--carpeta", str(BASE), "--nit", "819002433",
+    copia = tmp_path / "copia"
+    shutil.copytree(BASE, copia)
+    codigo = cli.main(["--carpeta", str(copia), "--nit", "819002433",
                        "--periodo", "2026-07", "--salida", str(salida)])
     impreso = capsys.readouterr().out
     # M6: antes esperaba 0 y esa era justamente la mentira. La corrida imprime
@@ -65,7 +68,9 @@ def test_el_cli_corre_extremo_a_extremo(tmp_path, capsys):
 
 
 def test_el_cli_se_detiene_con_periodo_equivocado(tmp_path, capsys):
-    codigo = cli.main(["--carpeta", str(BASE), "--nit", "819002433",
+    copia = tmp_path / "copia"
+    shutil.copytree(BASE, copia)
+    codigo = cli.main(["--carpeta", str(copia), "--nit", "819002433",
                        "--periodo", "2026-06",
                        "--salida", str(tmp_path / "p.xlsx")])
     assert codigo == 2

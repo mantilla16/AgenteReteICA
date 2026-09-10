@@ -14,6 +14,7 @@ Escala, de menos a mas grave:
 ejecutar es la ausencia de resultado, y eso impide concluir.
 """
 
+import shutil
 from pathlib import Path
 
 import pytest
@@ -27,7 +28,12 @@ BASE = Path(__file__).parent / "fixtures" / "terlica_202607"
 _ARGS = ["--nit", "819002433", "--periodo", "2026-07"]
 
 
-def _correr(tmp_path, carpeta=BASE, extra=()):
+def _correr(tmp_path, carpeta=None, extra=()):
+    """Nunca contra BASE: el CLI escribe la plantilla de atestacion en la
+    carpeta que analiza, y las fixtures son de solo lectura."""
+    if carpeta is None:
+        carpeta = tmp_path / "copia"
+        shutil.copytree(BASE, carpeta)
     return cli.main(["--carpeta", str(carpeta), *_ARGS,
                      "--salida", str(tmp_path / "papel.xlsx"), *extra])
 
@@ -98,7 +104,9 @@ def test_insumo_faltante_sigue_siendo_2(tmp_path):
 
 
 def test_identidad_incompatible_sigue_siendo_2(tmp_path):
-    codigo = cli.main(["--carpeta", str(BASE), "--nit", "819002433",
+    copia = tmp_path / "copia"
+    shutil.copytree(BASE, copia)
+    codigo = cli.main(["--carpeta", str(copia), "--nit", "819002433",
                        "--periodo", "2026-06",
                        "--salida", str(tmp_path / "p.xlsx")])
     assert codigo == 2

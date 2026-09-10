@@ -2,9 +2,12 @@
 
 import argparse
 import sys
+from pathlib import Path
 
 from motor_reteica.ia.cliente import (MODELO_POR_DEFECTO, VARIABLE_LLAVE,
                                       ClienteIA)
+from motor_reteica.atestacion import (NOMBRE_ARCHIVO as ATESTACION_ARCHIVO,
+                                      escribir_plantilla)
 from motor_reteica.identidad import IdentidadIncompatible
 from motor_reteica.papel_excel import generar_papel
 from motor_reteica.plantilla.deposito import depositar
@@ -108,6 +111,18 @@ def main(argv=None) -> int:
     except FileNotFoundError as error:
         print("Falta un insumo obligatorio: %s" % error, file=sys.stderr)
         return 2
+
+    # D2: si nadie ha atestado, dejar la plantilla lista con las actividades
+    # que el borrador declara. Lo hace el CLI y no revisar(), para que
+    # analizar una carpeta no la modifique.
+    carpeta = Path(args.carpeta)
+    if not (carpeta / ATESTACION_ARCHIVO).exists():
+        ruta_plantilla = escribir_plantilla(
+            carpeta, ctx.municipio.nombre,
+            [a.codigo for a in ctx.borrador.actividades],
+            ctx.candidatas_sin_declarar)
+        print("\nNadie ha atestado las tarifas (C7 queda NO EJECUTADO).")
+        print("Plantilla lista para completar: %s" % ruta_plantilla.name)
 
     _tablero(ctx)
     if args.formato == "plantilla":

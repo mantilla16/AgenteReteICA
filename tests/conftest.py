@@ -1,3 +1,4 @@
+import shutil
 from pathlib import Path
 
 import pytest
@@ -42,3 +43,17 @@ def borrador():
 @pytest.fixture(scope="session")
 def recon(lineas, erp):
     return reconstruir(lineas, erp, MUNICIPIO, MAPA)
+
+
+@pytest.fixture
+def carpeta_de_corrida(tmp_path):
+    """Copia de las fixtures para correr el CLI encima.
+
+    El CLI escribe atestacion.plantilla.json en la carpeta que analiza (D2),
+    asi que apuntarlo a tests/fixtures la ensucia -- y las fixtures son de
+    SOLO LECTURA por protocolo del proyecto. Ya paso una vez: el archivo
+    llego a quedar commiteado dentro de las fixtures.
+    """
+    destino = tmp_path / "corrida"
+    shutil.copytree(BASE, destino)
+    return destino
