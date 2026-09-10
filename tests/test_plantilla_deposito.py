@@ -179,3 +179,30 @@ def test_el_logo_sobrevive_al_deposito(ctx, tmp_path):
     depositar(ctx, salida)
     with zipfile.ZipFile(salida) as z:
         assert "xl/media/image1.emf" in z.namelist()
+
+
+# --------------------------------------------------------------------------
+# Hallazgos del loop de validacion (vuelta 1)
+# --------------------------------------------------------------------------
+
+def test_el_texto_de_la_cuenta_muestra_el_porcentaje_no_los_digitos(papel):
+    """V1: se escribia 'Impuest ICA Reten 0007' -- los ultimos digitos de la
+    cuenta -- donde SAP y la plantilla dicen 'Impuest ICA Reten 7%'."""
+    hoja = papel["AUX FISCAL"]
+    textos = {hoja.cell(row=f, column=3).value for f in range(7, 19)
+              if hoja.cell(row=f, column=3).value}
+    assert textos == {"Impuest ICA Reten 7%", "Impuest ICA Reten 10%"}, textos
+
+
+def test_el_balance_tambien_muestra_el_porcentaje(papel):
+    hoja = papel["BALANCE"]
+    textos = [hoja.cell(row=f, column=4).value for f in range(5, 11)
+              if hoja.cell(row=f, column=4).value]
+    assert all("%" in t for t in textos), textos
+    assert not any("00" in t.split()[-1] for t in textos), textos
+
+
+def test_el_nit_de_la_caratula_lleva_digito_de_verificacion(papel):
+    """V2: el papel de la firma identifica al cliente como 819002433-6.
+    Escribir el NIT sin su DV lo deja incompleto en un documento que se firma."""
+    assert str(papel["Check List"]["D3"].value) == "819002433-6"

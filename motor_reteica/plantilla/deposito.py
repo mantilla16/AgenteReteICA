@@ -31,6 +31,7 @@ import openpyxl
 from openpyxl.cell.cell import MergedCell
 
 from motor_reteica.plantilla.fidelidad import guardar_conservando_formato
+from motor_reteica.tipos import Estado
 
 PLANTILLA = Path(__file__).parent / "PT_ReteICA_plantilla.xlsx"
 
@@ -82,6 +83,34 @@ def _limpiar(hoja, desde: int, hasta: int, columnas: range) -> None:
                 celda.value = None
 
 
+def _texto_de_cuenta(tarifa) -> str:
+    """'Impuest ICA Reten 7%', como lo escribe SAP.
+
+    V1 del loop de validacion: se derivaba de los ultimos digitos de la
+    cuenta (cuenta[-4:]) y salia 'Impuest ICA Reten 0007'. El porcentaje sale
+    de la TARIFA, no del numero de cuenta.
+    """
+    return "Impuest ICA Reten %g%%" % (float(tarifa) * 1000)
+
+
+def _digito_de_verificacion(nit: str) -> str:
+    """DV del NIT segun el algoritmo de la DIAN.
+
+    V2 del loop: la caratula mostraba 819002433 donde el papel de la firma
+    dice 819002433-6. El DV no se inventa: es una funcion del NIT, y la
+    prueba lo comprueba contra el del documento real.
+    """
+    pesos = (3, 7, 13, 17, 19, 23, 29, 37, 41, 43, 47, 53, 59, 67, 71)
+    digitos = [int(c) for c in str(nit) if c.isdigit()]
+    suma = sum(d * pesos[i] for i, d in enumerate(reversed(digitos)))
+    residuo = suma % 11
+    return str(residuo if residuo < 2 else 11 - residuo)
+
+
+def _nit_con_dv(nit: str) -> str:
+    return "%s-%s" % (nit, _digito_de_verificacion(nit))
+
+
 def _fecha(valor) -> str:
     """SAP las escribe como texto dd.mm.aaaa y asi las lee el auditor."""
     return valor.strftime("%d.%m.%Y")
@@ -96,7 +125,8 @@ def _depositar_aux_fiscal(libro, ctx) -> None:
     for linea in ctx.lineas:
         hoja.cell(row=fila, column=2, value=linea.cuenta)
         hoja.cell(row=fila, column=3,
-                  value="Impuest ICA Reten %s" % linea.cuenta[-4:])
+                  value=_texto_de_cuenta(
+                      ctx.municipio.tarifa_por_cuenta.get(linea.cuenta, 0)))
         hoja.cell(row=fila, column=4, value=linea.nit)
         hoja.cell(row=fila, column=5, value=linea.tercero)
         hoja.cell(row=fila, column=6, value=_fecha(linea.fecha_documento))
@@ -166,7 +196,8 @@ def _depositar_balance(libro, ctx) -> None:
         hoja.cell(row=fila, column=2, value="DA09")
         hoja.cell(row=fila, column=3, value=cuenta)
         hoja.cell(row=fila, column=4,
-                  value="Impuest ICA Reten %s" % cuenta[-4:])
+                  value=_texto_de_cuenta(
+                      ctx.municipio.tarifa_por_cuenta.get(cuenta, 0)))
         hoja.cell(row=fila, column=5, value="COP")
         hoja.cell(row=fila, column=9, value=int(saldo))
         fila += 1
@@ -177,7 +208,7 @@ def _depositar_check_list(libro, ctx) -> None:
     anio, mes = (int(p) for p in ctx.periodo.split("-"))
 
     hoja["D2"] = ctx.borrador.razon_social
-    hoja["D3"] = ctx.nit
+    hoja["D3"] = _nit_con_dv(ctx.nit)
     hoja["D6"] = "Revisión Reteica"
     hoja["D7"] = _MESES[mes - 1]
     try:
@@ -383,6 +414,50 @@ def _depositar_revision_ica(libro, ctx) -> None:
     hoja["G28"] = "=+G26"
 
 
+# Celdas donde la plantilla trae conclusiones ESCRITAS A MANO.
+_CONCLUSION_FACTURAS = ("Validación de facturas", "B33")
+_CONCLUSION_GENERAL = ("REVISION ICA", "A30")
+
+
+def _conclusion_de_facturas(ctx) -> str:
+    """Derivada del estado de C11, nunca copiada de la plantilla.
+
+    La plantilla dice "no se presentan diferencias en las facturas" como
+    texto fijo. Dejarlo intacto hace que el papel lo afirme pase lo que pase
+    -- que es la queja con la que nacio este proyecto, automatizada.
+    """
+    c11 = next((r for r in ctx.resultados if r.codigo == "C11"), None)
+    if c11 is None:
+        return "El cotejo de facturas no forma parte de esta revision."
+
+    if c11.estado is Estado.NO_EJECUTADO:
+        return ("El cotejo de facturas NO SE EJECUTO: %s. Esta hoja no "
+                "respalda conclusion alguna sobre las facturas."
+                % c11.detalle)
+
+    if c11.estado is Estado.OK:
+        return ("De acuerdo con el recalculo de retenciones realizado sobre "
+                "las facturas fuente, no se presentan diferencias. %s"
+                % c11.detalle)
+
+    partes = ["El cotejo de facturas presenta %d excepcion(es):"
+              % len(c11.excepciones)]
+    for excepcion in c11.excepciones:
+        partes.append("  - [%s] %s" % (excepcion.severidad.value,
+                                       excepcion.descripcion))
+    return "\n".join(partes)
+
+
+def _depositar_conclusiones(libro, ctx) -> None:
+    hoja, celda = _CONCLUSION_FACTURAS
+    libro[hoja][celda] = _conclusion_de_facturas(ctx)
+
+    # La conclusion general ya la deriva hallazgos.consolidar() del estado de
+    # todos los controles, e incluye la limitacion de alcance. Se usa esa.
+    hoja, celda = _CONCLUSION_GENERAL
+    libro[hoja][celda] = "Conclusion: %s" % ctx.informe.conclusion
+
+
 def depositar(ctx, destino, plantilla: Path = None) -> Path:
     """Escribe el papel final a partir de la plantilla de la firma."""
     plantilla = Path(plantilla or PLANTILLA)
@@ -400,5 +475,6 @@ def depositar(ctx, destino, plantilla: Path = None) -> Path:
     _depositar_facturas(libro, ctx)
     _depositar_borrador_terlica(libro, ctx)
     _depositar_revision_ica(libro, ctx)
+    _depositar_conclusiones(libro, ctx)
 
     return guardar_conservando_formato(libro, plantilla, Path(destino))
