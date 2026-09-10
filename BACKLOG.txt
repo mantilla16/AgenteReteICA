@@ -1385,3 +1385,89 @@ CRITERIO DE PARIDAD PARA RETIRAR papel_excel.py (D10)
   - El logo de la firma sobrevive al guardado.
   - 294 pruebas base verdes + las nuevas de cada fase.
   - Verificado contra la carpeta real del cliente sin romper otro control.
+
+
+================================================================================
+X1 CAMBIA DE ESTADO -- llego la normativa (2026-09-10)
+================================================================================
+Felipe entrego el paquete normativo de Santa Marta. X1 deja de ser "conseguir
+un PDF" y pasa a ser un problema de extraccion verificable.
+
+QUE LLEGO Y QUE SE PUEDE LEER (medido, no supuesto)
+  ACUERDO 004 de 2016 ................. LEGIBLE (.docx, 354k chars) -- pero es de 2016
+  RESOLUCION 098 de 30-ene-2026 ....... LEGIBLE (.docx, 46k chars)
+      "Adoptese la Clasificacion de Actividades Economicas ... y su TARIFA"
+      Es de 2026 y POSTERIOR al Acuerdo 018. Es la fuente correcta para C7.
+  ACUERDO 018 del 30-dic-2025 ......... ESCANEADO, 0 chars, 49 paginas
+      MODIFICA EL ESTATUTO DE ICA. Es la norma que gobierna 2026.
+  CALENDARIO TRIBUTARIO 2026 .......... ESCANEADO (daria los vencimientos)
+  Resoluciones 150, 349, 355 .......... ESCANEADAS
+
+EXPERIMENTO DE EXTRACCION (Resolucion 098)
+La tabla sale como flujo de parrafos irregular, no como tabla de Word:
+    101 / 1020 / <descripcion> / 5 / Industriales
+pero a veces el codigo y la descripcion vienen pegados, y a veces dos codigos
+comparten parrafo ("4665 ... 4669 ...").
+Un parser ingenuo extrajo 348 codigos y acerto 3 de 5 contra las tarifas
+CONOCIDAS del borrador de julio:
+    5224 -> 10  OK        7490 -> 7  OK        9609 -> 7  OK
+    4669 -> None !!       9903 -> None !!
+Fallo porque pierde el codigo que comparte parrafo con otro.
+3 de 5 es NOTA REPROBATORIA para algo que determina el impuesto. Y fallo de
+forma ruidosa (None) por suerte, no por diseno: con otro orden habria asignado
+una tarifa EQUIVOCADA en silencio.
+NO se carga la tabla hasta que reproduzca 5 de 5 y tenga arnes de verificacion.
+
+DECISION PENDIENTE DE FELIPE
+  a) OCR del Acuerdo 018 (49 pag). P2 cerro "no OCR", pero eso fue para
+     FACTURAS. Esto es la norma que gobierna: es otra decision.
+  b) Pedir a la Alcaldia el 018 en texto/Word.
+  c) Usar la Resolucion 098 (ene-2026, posterior al 018) como fuente de
+     tarifas y declarar en el papel que el Acuerdo 018 no se pudo leer.
+Sin resolver esto, cargar las tarifas de 2016 seria ASUMIR que la
+modificacion de dic-2025 no cambio nada. Eso es justo lo que este motor no
+hace.
+
+================================================================================
+TRIAGE DE LAS OBJECIONES DE IA-3 (corrida real con llave, 2026-09-10)
+================================================================================
+La Revision Inteligente corrio de verdad por primera vez y produjo 3 obs de
+IA-1 y 8 de IA-3. Triage contra el codigo:
+
+V4 [CONFIRMADA Y CUANTIFICADA] "sin impacto" deberia ser "indeterminado".
+   hallazgos.consolidar() escribe "Ninguna excepcion tiene impacto
+   cuantificado ... son de clasificacion y presentacion". Con C7 SIN EJECUTAR
+   esa afirmacion no se sostiene: reclasificar cambia la tarifa.
+   CUANTIFICADO con la tabla preliminar de la Resolucion 098:
+     FE338043 base 2.546.000  4669(10) -> 3319(7)  = 7.638
+     FEV21379 base 1.115.626  9903(10) -> 7310(7)  = 3.347
+     FE10     base 5.000.000  7490(7)  -> 4390(7)  =     0
+     TOTAL POTENCIAL .............................. 10.985 pesos
+   El papel dice hoy que el impacto es CERO. Debe decir INDETERMINADO
+   mientras C7 no se ejecute.
+
+V5 [CONFIRMADA] Falso HALLAZGO de C11: el PDF S_ALR_87012277 (que es el
+   EXTRACTO DE SAP, no una factura) entra a la lista de facturas y C11 lo
+   reporta como "la factura no aparece en el auxiliar". El clasificador trata
+   como factura todo PDF que no sea el borrador. Hay que exigir que una
+   factura PAREZCA una factura, o el papel acusa al cliente de algo falso.
+
+V6 [CONFIRMADA] C14 muestra estado contradictorio: "NO EJECUTADO" en la
+   columna de estado y "no aplica" en el detalle. Son cosas distintas y el
+   papel dice las dos.
+
+V7 [CONFIRMADA, DE DISENO] Convergencia C6 + IA-1 sobre los mismos
+   documentos. Dos controles independientes senalando el mismo error es
+   corroboracion, no dos observaciones sueltas. Deberia consolidarse.
+
+V8 [CONFIRMADA, DE DISENO] Tasa de excepcion 3 de 3 en la muestra de
+   clasificacion. Una tasa del 100% es un hallazgo de proceso, no tres
+   incidencias. El papel no reporta cobertura ni tasa.
+
+V9 [EXPLICABLE, FALTA DECIRLO] "C8 OK pero hay desfase de fecha". Es correcto
+   por diseno -- C8 mira el auxiliar, el desfase solo existe contra el PDF y
+   lo ve C11 -- pero el detalle de C8 no lo explica, asi que parece
+   contradiccion.
+
+V10 [YA CUBIERTA] 2368010090 excluida sin atestacion: es M11 funcionando,
+   C13 ya emite el aviso. La IA no lo vio porque el aviso no destaca.
