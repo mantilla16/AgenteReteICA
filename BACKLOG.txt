@@ -1168,3 +1168,138 @@ M12  [CERRADO 2026-09-09, ver item M12 mas arriba] Verificado: C1 ya actua
      atestado y la capa IA.
 PRUEBA CIEGA: el motor sigue sin correrse contra un mes que no haya visto.
      Conseguir agosto 2026 antes de dar por buena la etapa 3.
+
+
+================================================================================
+================================================================================
+ETAPA 6 - LA PLANTILLA REAL DEL AUDITOR COMO PAPEL FINAL (abierta 2026-09-10)
+================================================================================
+================================================================================
+
+Cambio de arquitectura pedido por Felipe: el resultado final deja de ser un
+libro que el motor inventa desde cero (papel_excel.py, formato propio) y pasa
+a ser LA PLANTILLA REAL que la firma ya usa:
+
+  "PT Revision Industria y Comercio Julio-Terlica 2026.xlsx"  (9 hojas)
+
+El motor seguira recibiendo los insumos por separado (balance, auxiliares,
+ERP, borrador, facturas) pero al construir el papel debe DEPOSITAR partes de
+esos documentos dentro de la plantilla.
+
+--------------------------------------------------------------------------------
+DECISIONES TOMADAS (2026-09-10)
+--------------------------------------------------------------------------------
+D10. La plantilla REEMPLAZA a papel_excel.py como salida final.
+     Migracion gradual: papel_excel.py NO se retira hasta que la plantilla
+     cubra lo mismo (semaforo 5.3, hoja de Notas al frente 5.4, tabla de
+     excepciones de IA separada, estado ATESTADO). Ver CRITERIO DE PARIDAD.
+
+D11. Las formulas con REFERENCIA DE FILA ABSOLUTA ENTRE HOJAS se reemplazan
+     por el VALOR FINAL que calcula el motor, escrito como numero fijo.
+     Ninguna formula de Excel decide un resultado del papel.
+     Es el mismo principio que sostiene todo el proyecto: el motor
+     deterministico es la unica fuente de verdad.
+
+--------------------------------------------------------------------------------
+HALLAZGO QUE MOTIVA D11: un control que pasa por construccion, en Excel
+--------------------------------------------------------------------------------
+REVISION ICA tiene:
+    N12 = +BALANCE!I157      -> hoy es la cuenta 2368010007 (verificado)
+    N13 = +BALANCE!I159      -> hoy es la cuenta 2368010010 (verificado)
+
+No busca la cuenta por su NUMERO: apunta a la FILA 157 y 159 a secas. Si el
+export de SAP del mes siguiente trae una fila mas o una menos por encima de
+esas cuentas, la formula sigue calculando un numero -- el de la cuenta
+EQUIVOCADA -- sin ningun error visible. Es exactamente el defecto que este
+proyecto persigue desde el dia uno, escondido en una formula en vez de en
+Python.
+
+Las formulas INTRA-HOJA (DECLARACION!K8=SUM(K3:K7), CUADRO RETEICA!H10, los
+ROUND de BORRADOR TERLICA) no tienen ese problema: no cruzan hojas ni
+dependen de una fila fija de otro documento. Se pueden conservar.
+
+--------------------------------------------------------------------------------
+RIESGO TECNICO: el logo se pierde en silencio
+--------------------------------------------------------------------------------
+VERIFICADO con warnings.catch_warnings sobre el archivo real:
+  xl/media/image1.emf  (21.996 bytes)  -> logo de la firma, formato EMF
+  xl/media/image2.png (108.982 bytes)  -> sobrevive, esta en DECLARACION
+
+openpyxl NO soporta EMF y lo DESCARTA AL CARGAR, antes de que el motor
+escriba nada: "wmf image format is not supported so the image is being
+dropped". Abrir y volver a guardar la plantilla con openpyxl entrega un
+papel de la firma SIN EL LOGO DE LA FIRMA.
+Hay que convertir el EMF a PNG una vez y reinsertarlo tras escribir.
+No hay macros (.xlsx sin proyecto VBA): ese riesgo no existe.
+
+--------------------------------------------------------------------------------
+MAPA DE HOJAS -> FUENTE EN EL MOTOR (leido del archivo real, no supuesto)
+--------------------------------------------------------------------------------
+Check List             caratula AR-FO + checklist de insumos 1..8 (a/x/N/A)
+                       <- datos de ctx + insumos_obtenidos (C13)
+DECLARACION            5 renglones del borrador, con SUM propios
+                       <- borrador.actividades
+CUADRO RETEICA         el export de SAP pegado tal cual
+                       <- filas_erp
+AUX FISCAL             el auxiliar 2368 completo (12 lineas en julio)
+                       <- lineas
+BALANCE                el balance completo, 349 filas
+                       <- balance_terlica_202607.xlsx (ya extraido)
+BORRADOR TERLICA       reconstruccion manual del auditor, renglon por renglon
+                       <- reconstruccion.por_actividad / por_grupo
+Validacion de facturas las 3 facturas cotejadas, con formula de diferencia
+                       <- facturas + C11 (calcula exactamente esto)
+REVISION ICA           auditoria vs declaracion, con formulas cruzadas
+                       <- C9 / C2
+Pago                   VACIA
+                       <- confirma que C12 nunca tuvo insumo
+
+Dos cosas que valen por si solas, encontradas al leer la plantilla:
+  - "Validacion de facturas" ya trae escrita a mano la fecha de FE10
+    (26/06/2026) y concluye "no se presentan diferencias": coincide con lo
+    que C11 encontro por su cuenta.
+  - "BORRADOR TERLICA" fila 26 tiene una fila a medio llenar ("Mtt mueble",
+    CDEM 811033997, SIN monto): es el auditor tropezando a mano con el mismo
+    caso que C6 detecta solo -- la reparacion de manguera clasificada en el
+    renglon 4669 de comercio.
+
+--------------------------------------------------------------------------------
+FASES
+--------------------------------------------------------------------------------
+FASE 1 - hojas de datos crudos (riesgo BAJO: son la fuente, no el resultado)
+  AUX FISCAL <- lineas | CUADRO RETEICA <- filas_erp | BALANCE <- balance
+  Ninguna depende de formulas de otras hojas.
+  A decidir: BALANCE se deposita completo (349 filas) o solo el extracto 2368.
+
+FASE 2 - DECLARACION y Validacion de facturas (riesgo BAJO-MEDIO)
+  DECLARACION <- borrador.actividades. K8/L8 son SUM intra-hoja: se conservan.
+  Validacion de facturas <- C11. Las formulas I27 (=G27*H27) y K27
+  (=+I27-J27) se congelan a valor: C11 ya calcula base x tarifa y diferencia.
+
+FASE 3 - BORRADOR TERLICA (riesgo MEDIO-ALTO)
+  El layout de filas de julio (18 filas para 5 renglones, con huecos) es
+  especifico de este mes. Un mes con mas grupos por renglon necesita mas
+  filas: es el MISMO problema que 3.2 resolvio en Python, ahora expresado en
+  filas de Excel. Requiere insercion dinamica de filas, no plantilla fija.
+
+FASE 4 - Check List (riesgo BAJO)
+  Checklist 1..8 <- insumos_obtenidos. Reinsertar el logo como PNG.
+
+FASE 5 - REVISION ICA (el mas grande; es donde vive D11)
+  N12/N13 <- saldos[cuenta] que C2 ya usa, como valor fijo.
+  O12/O13 <- el valor final calculado en Python.
+  Acotar a las filas 1..25: las 408 restantes son plantilla generica
+  municipal con renglones que Santa Marta no usa (autorretenciones, etc.).
+
+FASE 6 - paridad con lo que ya existe
+  Semaforo (5.3), hoja de Notas al frente (5.4) y tabla de excepciones de IA
+  separada, portados a la plantilla.
+
+--------------------------------------------------------------------------------
+CRITERIO DE PARIDAD PARA RETIRAR papel_excel.py (D10)
+--------------------------------------------------------------------------------
+  - Anclas de julio 2026 exactas.
+  - Semaforo, hoja de Notas y separacion IA/controles presentes.
+  - El logo de la firma sobrevive al guardado.
+  - 294 pruebas base verdes + las nuevas de cada fase.
+  - Verificado contra la carpeta real del cliente sin romper otro control.
