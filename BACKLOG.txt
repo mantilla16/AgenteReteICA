@@ -1194,11 +1194,53 @@ D10. La plantilla REEMPLAZA a papel_excel.py como salida final.
      cubra lo mismo (semaforo 5.3, hoja de Notas al frente 5.4, tabla de
      excepciones de IA separada, estado ATESTADO). Ver CRITERIO DE PARIDAD.
 
-D11. Las formulas con REFERENCIA DE FILA ABSOLUTA ENTRE HOJAS se reemplazan
-     por el VALOR FINAL que calcula el motor, escrito como numero fijo.
-     Ninguna formula de Excel decide un resultado del papel.
-     Es el mismo principio que sostiene todo el proyecto: el motor
-     deterministico es la unica fuente de verdad.
+D11. [REVISADA 2026-09-10 por Felipe] El papel sigue VIVO: las referencias
+     entre hojas NO se congelan a valor, se vuelven DINAMICAS -- ancladas al
+     SIGNIFICADO (numero de cuenta, codigo de actividad) y no a la POSICION
+     de la fila. Si otro ejercicio trae una fila de mas, el papel sigue
+     siendo preciso.
+
+     Version anterior de D11 (congelar todo a valor) queda descartada: hacia
+     el papel exacto pero muerto, y Felipe quiere conservar el papel de
+     trabajo tal como es.
+
+     PERO la fórmula dinamica la calcula Excel, no el motor, y eso
+     reintroduce una segunda fuente de verdad. Se neutraliza con la CELDA
+     TESTIGO: junto a cada valor que cruza hojas, el motor escribe su propio
+     resultado congelado y una comparacion visible, del tipo
+         =IF(ROUND(E20,0)<>474000, "REVISAR", "OK")
+     donde 474000 lo congela el motor. Si la formula y el motor discrepan,
+     el papel lo dice solo al abrirlo, en vez de que nadie se entere.
+     -> PENDIENTE DE CONFIRMAR con Felipe: la celda testigo agrega celdas al
+        formato de la firma. Si no se quiere tocar el layout, la alternativa
+        es dejar el testigo en una hoja de control aparte.
+
+     Las 5 referencias que cruzan hojas (barrido completo del archivo real):
+       N12 = +BALANCE!I157        -> VLOOKUP(2368010007, BALANCE!$C:$I, 7, FALSE)
+       N13 = +BALANCE!I159        -> VLOOKUP(2368010010, BALANCE!$C:$I, 7, FALSE)
+       F20 = +DECLARACION!K8      -> SUMIF(DECLARACION!$I:$I,">0",...!$K:$K)
+       G20 = +DECLARACION!L8      -> SUMIF(DECLARACION!$I:$I,">0",...!$L:$L)
+       G28 = +DECLARACION!J21     -> ver D12: esta ROTA
+     Se usa VLOOKUP con coincidencia EXACTA a proposito: si la cuenta
+     desaparece del balance devuelve #N/A, un error RUIDOSO. SUMIF devolveria
+     0 en silencio, que es justo lo que este proyecto no acepta.
+     Nota tecnica: openpyxl escribe los nombres de funcion en ingles
+     (VLOOKUP/SUMIF) y separador por comas; el Excel en espanol los muestra
+     traducidos (BUSCARV/SUMAR.SI) y con punto y coma. Es correcto asi.
+
+D12. BUG REAL ENCONTRADO EN LA PLANTILLA DE LA FIRMA (2026-09-10)
+     REVISION ICA!G28 = +DECLARACION!J21, y DECLARACION!J21 esta VACIA.
+     F28 ademas esta fija en 0. Valores que quedaron guardados en el archivo
+     entregado (leidos con data_only=True):
+                          AUDITORIA   DECLARACION   DIFERENCIA
+       fila 26 VALOR A PAGAR  474.000     474.000            0   OK
+       fila 28 TOTAL A PAGAR  474.000           0      474.000   MAL
+     El papel muestra una diferencia de 474.000 -- el impuesto completo -- en
+     su fila TOTAL A PAGAR, y dos filas mas abajo (A30) concluye que los
+     valores "son integros y corresponden a las operaciones economicas".
+     Es el MISMO patron que el spec original le reprocha al papel manual de
+     julio: concluir limpio con una diferencia visible sin explicar.
+     Al implementar la etapa 6 hay que corregirlo, no reproducirlo.
 
 --------------------------------------------------------------------------------
 HALLAZGO QUE MOTIVA D11: un control que pasa por construccion, en Excel
