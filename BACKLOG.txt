@@ -1,10 +1,41 @@
 ================================================================================
-MOTOR RETEICA - LISTA DE CAMBIOS PENDIENTES
+MOTOR RETEICA - LISTA DE CAMBIOS
 ================================================================================
-Abierto:     2026-09-09
-Estado:      EN DISCUSION - nada implementado todavia
-Linea base:  151 pruebas verdes; anclas Terlica julio 2026 (spec seccion 10.1)
-             intactas. Cualquier cambio que las rompa se revierte.
+Abierto:      2026-09-09
+Actualizado:  2026-09-10
+
+ESTADO REAL (leer esto antes que nada)
+  Etapas 1..5      IMPLEMENTADAS y commiteadas.
+  Etapa 6          ABIERTA. Cambia la salida final: deja de ser el libro que
+                   genera papel_excel.py y pasa a ser la plantilla real de la
+                   firma. TIENE UNA DECISION PENDIENTE DE FELIPE (celda
+                   testigo de D11, ver ETAPA 6).
+  Pruebas          294 verdes (151 de linea base historica + 143 nuevas).
+  Repositorio      22 commits. Respaldado en GitHub, repo PRIVADO
+                   Frios89/Agente_ReteICA, compartido con mantilla16.
+                   El repo de trabajo (excelrix) NO tiene remoto a proposito:
+                   contiene expedientes de OTROS clientes. Para respaldar:
+                     git subtree push --prefix=Agente_ReteICA \
+                       https://github.com/Frios89/Agente_ReteICA.git main
+                   (nunca 'git push' a secas desde excelrix)
+
+Linea base de no-regresion: 294 pruebas verdes y las anclas de Terlica julio
+             2026 (spec seccion 10.1) exactas. Cualquier cambio que las rompa
+             se revierte.
+
+BLOQUEOS PARA DECLARAR PRODUCCION (2026-09-10)
+  1. CERO PRUEBA CIEGA. Las fixtures son byte-identicas a julio. El motor
+     nunca ha corrido un mes que no haya visto. Es el riesgo numero uno y
+     hace falta agosto 2026 para cerrarlo.
+  2. La corrida real da EXIT 3 / semaforo ROJO: C7 sin atestacion y C12 sin
+     pago. Es correcto -- refleja la realidad de los insumos -- pero
+     significa que hoy el producto siempre concluye "no concluyente".
+     (C2 ya NO esta bloqueado: el balance se extrajo el 2026-09-10.)
+  3. Etapa 6 abierta: no tiene sentido congelar produccion sobre una salida
+     que se va a retirar.
+  4. El .exe distribuible esta viejo (09-sep) frente al ultimo commit
+     (10-sep). Recompilar AL CERRAR la etapa 6, no antes: recompilar ahora
+     produce un binario que queda obsoleto en dias.
 
 Corpus de prueba: C:\Users\Felipe Rios\Downloads\OneDrive_1_9-9-2026
   OJO: auxiliar, borrador, ERP y las 3 facturas son BYTE-IDENTICOS a
@@ -1072,11 +1103,20 @@ correspondiente: un motor probado solo con datos correctos no esta probado.
 
 ESTADO DE LAS DECISIONES
 ------------------------
-Ninguna decision pendiente de Felipe. D1..D9 tomadas, P1..P5 cerradas,
-X1 y 3.1 resueltos por diseno, M1..M13 con arreglo definido.
-Todo el backlog es ejecutable.
-Nada de esto esta implementado: esta sesion fue de diagnostico y diseno, no se
-toco una linea del motor.
+[ESTE BLOQUE ES HISTORICO -- describia el cierre de la sesion de DISENO del
+ 2026-09-09, cuando efectivamente no habia nada implementado. Se conserva
+ como registro. Para el estado real ver la cabecera del documento.]
+
+Al cierre de aquella sesion: D1..D9 tomadas, P1..P5 cerradas, X1 y 3.1
+resueltos por diseno, M1..M13 con arreglo definido, y ninguna decision
+pendiente de Felipe.
+
+QUE CAMBIO DESPUES:
+  - Las etapas 1..5 se implementaron (sesiones del 09 y 10 de septiembre).
+  - D10, D11 y D12 se agregaron con la etapa 6.
+  - D11 fue REVISADA: el papel se mantiene vivo con referencias dinamicas.
+  - VUELVE A HABER UNA DECISION PENDIENTE DE FELIPE: la celda testigo de
+    D11 (dentro del layout de la firma, o en hoja de control aparte).
 
 
 ================================================================================
