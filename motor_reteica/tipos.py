@@ -69,6 +69,11 @@ class Excepcion:
     descripcion: str
     renglon: str = ""
     impacto_pesos: Decimal = Decimal("0")
+    # V7: la factura o comprobante al que se refiere la excepcion. Permite
+    # ver cuando DOS controles independientes senalan el MISMO documento,
+    # que es corroboracion y no dos observaciones sueltas. Se deja aparte de
+    # `renglon` porque un documento no es un renglon ni una cuenta ni un NIT.
+    documento: str = ""
     # M13: que TIPO de dato trae `renglon` en esta excepcion puntual. Ver
     # nota junto a REF_CUENTA/REF_NIT/REF_RENGLON mas arriba.
     tipo_referencia: str = REF_SIN_TIPO

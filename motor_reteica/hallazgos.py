@@ -4,7 +4,7 @@ La conclusion NO se redacta libremente: se deriva del estado de los controles.
 Un papel con controles en FALLA o NO_EJECUTADO no puede concluir limpio.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 
 from motor_reteica.tipos import Estado, Severidad
@@ -29,6 +29,10 @@ class Informe:
     controles_no_ejecutados: tuple
     controles_no_aplicables: tuple
     controles_atestados: tuple = ()
+    # V7: documento -> controles distintos que lo senalaron.
+    convergencias: dict = field(default_factory=dict)
+    # V8: cuantos documentos distintos tienen al menos una excepcion.
+    documentos_con_excepcion: int = 0
 
 
 # El control que valida la tarifa aplicada contra la del municipio.
@@ -43,7 +47,24 @@ def _tarifas_con_respaldo(resultados) -> bool:
     return False
 
 
-def consolidar(resultados) -> Informe:
+def _convergencias(excepciones) -> dict:
+    """Documentos senalados por DOS O MAS controles distintos.
+
+    Dos controles independientes apuntando al mismo documento por la misma
+    causa es corroboracion. Dejarlo como observaciones sueltas obliga al
+    lector a juntarlas por su cuenta, y normalmente no lo hace.
+    """
+    por_documento = {}
+    for excepcion in excepciones:
+        if not excepcion.documento:
+            continue
+        por_documento.setdefault(excepcion.documento, set()).add(excepcion.control)
+    return {documento: sorted(controles)
+            for documento, controles in sorted(por_documento.items())
+            if len(controles) > 1}
+
+
+def consolidar(resultados, documentos_revisados=None) -> Informe:
     excepciones = [e for r in resultados for e in r.excepciones]
     excepciones.sort(key=lambda e: (_ORDEN[e.severidad], -e.impacto_pesos))
 
@@ -53,6 +74,8 @@ def consolidar(resultados) -> Informe:
         if r.estado is Estado.NO_EJECUTADO and r.aplica)
     no_aplicables = tuple(
         r.codigo for r in resultados if not r.aplica)
+    convergencias = _convergencias(excepciones)
+    documentos = {e.documento for e in excepciones if e.documento}
     atestados = tuple(r.codigo for r in resultados
                       if r.estado is Estado.ATESTADO)
     impacto = sum((e.impacto_pesos for e in excepciones), Decimal("0"))
@@ -110,6 +133,26 @@ def consolidar(resultados) -> Informe:
             "No aplican al municipio de la declaracion: %s."
             % ", ".join(no_aplicables))
 
+    if convergencias:
+        detalle = "; ".join(
+            "%s (%s)" % (documento, " y ".join(controles))
+            for documento, controles in convergencias.items())
+        partes.append(
+            "CORROBORACION: los siguientes documentos fueron senalados por "
+            "mas de un control de forma independiente, lo que refuerza la "
+            "excepcion en vez de repetirla: %s." % detalle)
+
+    # V8: una tasa alta no son incidencias sueltas, es el proceso.
+    if documentos_revisados:
+        partes.append(
+            "Cobertura: %d de %d documento(s) revisado(s) presentan "
+            "excepcion." % (len(documentos), documentos_revisados))
+        if len(documentos) >= documentos_revisados:
+            partes.append(
+                "La totalidad de los documentos revisados presenta excepcion: "
+                "eso apunta a una deficiencia de PROCESO en la asignacion de "
+                "actividad, no a incidencias puntuales.")
+
     partes.append(LIMITACION_INTEGRIDAD)
 
     return Informe(
@@ -121,4 +164,6 @@ def consolidar(resultados) -> Informe:
         controles_no_ejecutados=no_ejecutados,
         controles_no_aplicables=no_aplicables,
         controles_atestados=atestados,
+        convergencias=convergencias,
+        documentos_con_excepcion=len(documentos),
     )

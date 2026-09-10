@@ -257,6 +257,11 @@ def revisar(carpeta, nit, periodo, municipio,
     mapa = _mapa_actividad(borrador, filas_erp, lineas, municipio)
     recon = reconstruir(lineas, filas_erp, municipio, mapa)
 
+    # V8: la poblacion sobre la que se juzga clasificacion son las lineas
+    # del auxiliar con documento identificable. Sirve para decir "3 de 3" en
+    # vez de dejar tres observaciones sueltas.
+    documentos_revisados = len({l.referencia for l in lineas if l.referencia})
+
     resultados = [
         c0,
         controles.c1_formulario_cuadra(borrador, municipio),
@@ -301,7 +306,8 @@ def revisar(carpeta, nit, periodo, municipio,
         facturas=facturas,
         reconstruccion=recon,
         resultados=resultados,
-        informe=consolidar(resultados),
+        informe=consolidar(resultados,
+                            documentos_revisados=documentos_revisados),
         huellas={clave: huella(rutas[clave]) for clave in sorted(presentes)
                  if clave in rutas},
         insumos_obtenidos=presentes,

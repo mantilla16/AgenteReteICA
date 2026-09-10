@@ -170,6 +170,9 @@ def ia1_plausibilidad(reconstruccion, borrador, municipio, cliente=None,
 
         excepciones.append(Excepcion(
             severidad=severidad, control="IA-1", descripcion=descripcion,
+            # V7: mismo documento que puede haber marcado C6. Es lo que
+            # permite ver la corroboracion entre dos controles independientes.
+            documento=linea.referencia,
             renglon=linea.cuenta, tipo_referencia=REF_CUENTA,
             **({"impacto_pesos": impacto} if impacto is not None else {})))
 

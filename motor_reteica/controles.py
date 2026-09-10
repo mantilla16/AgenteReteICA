@@ -390,7 +390,7 @@ def c6_clasificacion_por_linea(reconstruccion, facturas, mapa_actividad,
 
         if naturaleza == "SERVICIO" and es_renglon_comercio:
             excepciones.append(Excepcion(
-                severidad=Severidad.OBSERVACION, control="C6",
+                severidad=Severidad.OBSERVACION, control="C6", documento=linea.referencia,
                 descripcion="%s (NIT %s): el concepto [%s] es un servicio pero "
                             "esta clasificado en el renglon %s de comercio al "
                             "por mayor"
@@ -400,7 +400,7 @@ def c6_clasificacion_por_linea(reconstruccion, facturas, mapa_actividad,
         # cubrir y no lo dice.
         elif naturaleza == "COMERCIO" and not es_renglon_comercio:
             excepciones.append(Excepcion(
-                severidad=Severidad.OBSERVACION, control="C6",
+                severidad=Severidad.OBSERVACION, control="C6", documento=linea.referencia,
                 descripcion="%s (NIT %s): el concepto [%s] es una compra de "
                             "mercancia (comercio) pero esta clasificado en el "
                             "renglon %s, que no es de comercio"
@@ -408,7 +408,7 @@ def c6_clasificacion_por_linea(reconstruccion, facturas, mapa_actividad,
                 renglon=codigo, tipo_referencia=REF_RENGLON, impacto_pesos=_CERO))
         elif naturaleza == AMBIGUO:
             excepciones.append(Excepcion(
-                severidad=Severidad.AVISO, control="C6",
+                severidad=Severidad.AVISO, control="C6", documento=linea.referencia,
                 descripcion="%s (NIT %s): el concepto [%s] es ambiguo -- menciona "
                             "compra y servicio a la vez -- y no se puede "
                             "clasificar sin criterio humano"
@@ -416,7 +416,7 @@ def c6_clasificacion_por_linea(reconstruccion, facturas, mapa_actividad,
                 renglon=codigo, tipo_referencia=REF_RENGLON))
         elif naturaleza == DESCONOCIDO:
             excepciones.append(Excepcion(
-                severidad=Severidad.AVISO, control="C6",
+                severidad=Severidad.AVISO, control="C6", documento=linea.referencia,
                 descripcion="%s (NIT %s): el concepto [%s] no se pudo clasificar "
                             "como compra ni como servicio; queda sin cubrir"
                             % (linea.referencia, linea.nit, linea.concepto),
@@ -437,7 +437,7 @@ def c6_clasificacion_por_linea(reconstruccion, facturas, mapa_actividad,
             severidad = Severidad.HALLAZGO
             impacto = abs(factura.base * (tarifa_factura - tarifa_declarada))
         excepciones.append(Excepcion(
-            severidad=severidad, control="C6",
+            severidad=severidad, control="C6", documento=factura.numero,
             descripcion="%s (NIT %s): el proveedor declara la actividad %s en "
                         "su factura pero el borrador la clasifica en %s"
                         % (factura.numero, nit, en_factura, declarada),
@@ -523,7 +523,7 @@ def c11_cotejo_facturas(lineas, facturas, municipio) -> ResultadoControl:
         linea = por_referencia.get(factura.numero)
         if linea is None:
             excepciones.append(Excepcion(
-                severidad=Severidad.HALLAZGO, control="C11",
+                severidad=Severidad.HALLAZGO, control="C11", documento=factura.numero,
                 descripcion="%s: la factura no aparece en el auxiliar"
                             % factura.numero))
             continue
@@ -532,13 +532,13 @@ def c11_cotejo_facturas(lineas, facturas, municipio) -> ResultadoControl:
         if not factura.nit:
             sin_nit += 1
             excepciones.append(Excepcion(
-                severidad=Severidad.AVISO, control="C11",
+                severidad=Severidad.AVISO, control="C11", documento=factura.numero,
                 descripcion="%s: no se pudo leer el NIT del proveedor en el "
                             "PDF; ese campo queda a cotejo manual"
                             % factura.numero))
         elif factura.nit != linea.nit:
             excepciones.append(Excepcion(
-                severidad=Severidad.HALLAZGO, control="C11",
+                severidad=Severidad.HALLAZGO, control="C11", documento=factura.numero,
                 descripcion="%s: NIT en el PDF %s vs auxiliar %s"
                             % (factura.numero, factura.nit, linea.nit)))
 
@@ -547,13 +547,13 @@ def c11_cotejo_facturas(lineas, facturas, municipio) -> ResultadoControl:
         if factura.base is None:
             sin_base += 1
             excepciones.append(Excepcion(
-                severidad=Severidad.AVISO, control="C11",
+                severidad=Severidad.AVISO, control="C11", documento=factura.numero,
                 descripcion="%s: no se pudo leer la base gravable en el PDF; "
                             "la retencion contabilizada no se pudo verificar "
                             "contra el documento fuente" % factura.numero))
         elif tarifa is None:
             excepciones.append(Excepcion(
-                severidad=Severidad.AVISO, control="C11",
+                severidad=Severidad.AVISO, control="C11", documento=factura.numero,
                 descripcion="%s: la cuenta %s no tiene tarifa parametrizada; "
                             "no se puede recalcular la retencion"
                             % (factura.numero, linea.cuenta),
@@ -564,7 +564,7 @@ def c11_cotejo_facturas(lineas, facturas, municipio) -> ResultadoControl:
             diferencia = esperada - linea.retencion
             if abs(diferencia) > _RECALCULO:
                 excepciones.append(Excepcion(
-                    severidad=Severidad.HALLAZGO, control="C11",
+                    severidad=Severidad.HALLAZGO, control="C11", documento=factura.numero,
                     descripcion="%s: base %s del PDF x %s = %s, pero el "
                                 "auxiliar contabiliza %s"
                                 % (factura.numero, factura.base, tarifa,
@@ -577,7 +577,7 @@ def c11_cotejo_facturas(lineas, facturas, municipio) -> ResultadoControl:
         # --- fecha -----------------------------------------------------------
         if factura.fecha and factura.fecha != linea.fecha_documento:
             excepciones.append(Excepcion(
-                severidad=Severidad.OBSERVACION, control="C11",
+                severidad=Severidad.OBSERVACION, control="C11", documento=factura.numero,
                 descripcion="%s: la fecha de la factura es %s y el auxiliar la "
                             "registra con fecha de documento %s"
                             % (factura.numero, factura.fecha,
