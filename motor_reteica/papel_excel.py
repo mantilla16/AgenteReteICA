@@ -12,7 +12,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 import motor_reteica
 from motor_reteica.hallazgos import LIMITACION_INTEGRIDAD
 from motor_reteica.semaforo import evaluar
-from motor_reteica.tipos import Estado, Severidad
+from motor_reteica.tipos import Estado, Severidad, etiqueta_estado
 from motor_reteica.version import huella_del_codigo
 
 AZUL = "001871"
@@ -125,7 +125,7 @@ def _hoja_controles(libro, ctx):
     for resultado in ctx.resultados:
         fila = _fila(hoja, fila,
                      [resultado.codigo, resultado.nombre,
-                      resultado.estado.value, resultado.detalle],
+                      etiqueta_estado(resultado), resultado.detalle],
                      relleno=_RELLENO_ESTADO[resultado.estado])
     _nota_alcance(hoja, fila)
 

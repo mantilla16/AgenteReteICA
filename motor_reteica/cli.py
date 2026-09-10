@@ -11,7 +11,7 @@ from motor_reteica.plantilla.deposito import depositar
 from motor_reteica.parametros.municipios.santa_marta import MUNICIPIO
 from motor_reteica.pipeline import revisar
 from motor_reteica.semaforo import evaluar
-from motor_reteica.tipos import Estado
+from motor_reteica.tipos import Estado, etiqueta_estado
 
 MUNICIPIOS = {"santa_marta": MUNICIPIO}
 
@@ -48,7 +48,7 @@ def _tablero(ctx) -> None:
     for resultado in ctx.resultados:
         print("%s%-4s %-52s %s"
               % (_SIMBOLO[resultado.estado], resultado.codigo,
-                 resultado.nombre[:52], resultado.estado.value))
+                 resultado.nombre[:52], etiqueta_estado(resultado)))
     print("-" * 78)
     print("Auxiliar 2368         %14s" % ctx.total_auxiliar)
     print("Reporte del ERP       %14s" % ctx.total_erp)

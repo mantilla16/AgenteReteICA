@@ -43,6 +43,7 @@ from ..parametros.municipios.santa_marta import MUNICIPIO
 from ..pipeline import revisar
 from ..recursos import ruta_recurso
 from ..semaforo import evaluar
+from ..tipos import etiqueta_estado
 from .. import __version__
 
 app = FastAPI(title="Motor de Revision de ReteICA", version=__version__)
@@ -65,6 +66,34 @@ def _es_borrador_pdf(ruta: Path) -> bool:
         return True
     except Exception:
         return False
+
+
+_MARCAS_DE_FACTURA = ("FACTURA", "FACTURA ELECTRONICA", "FACTURA DE VENTA")
+
+
+def _es_factura_pdf(ruta: Path) -> bool:
+    """Un PDF es factura si se identifica COMO factura.
+
+    V5: antes se tomaba como factura TODO PDF que no fuera el borrador, y el
+    extracto de saldos de SAP (S_ALR_...) entraba a la muestra documental.
+    C11 lo reportaba como HALLAZGO -- "la factura no aparece en el auxiliar"
+    -- y el papel le imputaba al cliente una factura sin contabilizar que no
+    existe.
+
+    Si el PDF no trae capa de texto no se puede determinar, y entonces NO se
+    adivina: queda sin clasificar y el auditor decide. Es la misma regla que
+    1.5 aplica a las fuentes contables -- se verifica que el documento sea
+    del tipo que se dice.
+    """
+    try:
+        import pdfplumber
+        with pdfplumber.open(ruta) as pdf:
+            texto = " ".join((p.extract_text() or "") for p in pdf.pages[:2])
+    except Exception:
+        return False
+    sin_tildes = (texto.upper().replace("Ó", "O").replace("Í", "I")
+                  .replace("É", "E").replace("Á", "A").replace("Ú", "U"))
+    return any(marca in sin_tildes for marca in _MARCAS_DE_FACTURA)
 
 
 def _rol_xlsx(ruta: Path):
@@ -103,8 +132,12 @@ def _clasificar(rutas: list[Path]):
                         "declaracion: %r y %r" % (archivos["borrador"], ruta.name))
                 else:
                     archivos["borrador"] = ruta.name
-            else:
+            elif _es_factura_pdf(ruta):
                 facturas.append(ruta.name)
+            else:
+                # No es el borrador y tampoco se identifica como factura:
+                # no se adivina. V5.
+                sin_clasificar.append(ruta.name)
         elif extension in (".xlsx", ".xls"):
             rol = _rol_xlsx(ruta)
             if rol is None:
@@ -133,7 +166,7 @@ def _resumen(ctx) -> dict:
     luz = evaluar(ctx.informe)
     return {
         "controles": [{
-            "codigo": r.codigo, "nombre": r.nombre, "estado": r.estado.value,
+            "codigo": r.codigo, "nombre": r.nombre, "estado": etiqueta_estado(r),
             "detalle": r.detalle, "excepciones": len(r.excepciones),
             "aplica": r.aplica,
         } for r in ctx.resultados],

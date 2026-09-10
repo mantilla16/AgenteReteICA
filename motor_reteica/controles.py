@@ -482,9 +482,15 @@ def c8_corte(lineas, periodo) -> ResultadoControl:
                             % (linea.referencia, linea.fecha_documento, periodo),
                 renglon=linea.cuenta, tipo_referencia=REF_CUENTA))
 
+    # V9: sin esta frase, un C8 en OK junto a una excepcion de C11 por
+    # desfase de fecha se lee como contradiccion. No lo es -- son cosas
+    # distintas -- pero el papel tiene que decirlo.
     return _resolver("C8", nombre, excepciones,
-                     "%d linea(s) contabilizadas dentro del periodo %s"
-                     % (len(lineas), periodo))
+                     "%d linea(s) contabilizadas dentro del periodo %s. "
+                     "ALCANCE: compara las fechas QUE TRAE EL AUXILIAR entre "
+                     "si; el desfase entre la factura fisica y el registro "
+                     "contable no es visible aqui y lo detecta C11 contra el "
+                     "PDF." % (len(lineas), periodo))
 
 
 def c11_cotejo_facturas(lineas, facturas, municipio) -> ResultadoControl:

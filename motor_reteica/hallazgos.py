@@ -31,6 +31,18 @@ class Informe:
     controles_atestados: tuple = ()
 
 
+# El control que valida la tarifa aplicada contra la del municipio.
+_CONTROL_DE_TARIFAS = "C7"
+
+
+def _tarifas_con_respaldo(resultados) -> bool:
+    """Hay tabla de tarifas verificada, sea por el estatuto o por atestacion."""
+    for resultado in resultados:
+        if resultado.codigo == _CONTROL_DE_TARIFAS:
+            return resultado.estado in (Estado.OK, Estado.ATESTADO)
+    return False
+
+
 def consolidar(resultados) -> Informe:
     excepciones = [e for r in resultados for e in r.excepciones]
     excepciones.sort(key=lambda e: (_ORDEN[e.severidad], -e.impacto_pesos))
@@ -76,6 +88,18 @@ def consolidar(resultados) -> Informe:
         partes.append(
             "El impacto cuantificado de las excepciones asciende a %s pesos."
             % impacto)
+    elif excepciones and not _tarifas_con_respaldo(resultados):
+        # V4, objecion de IA-3 confirmada y cuantificada. Sin C7 no hay tabla
+        # de tarifas validada, y reclasificar un renglon normalmente CAMBIA
+        # la tarifa: el efecto en el impuesto no es cero, es desconocido.
+        # Medido sobre julio 2026 con la tabla preliminar de la Resolucion
+        # 098: las reclasificaciones que sugiere la IA valen hasta 10.985
+        # pesos. Decir "sin impacto" ahi es afirmar de mas.
+        partes.append(
+            "El impacto de las excepciones es INDETERMINADO, no nulo: sin la "
+            "tabla de tarifas del municipio verificada (C7) no se puede "
+            "afirmar que reclasificar un renglon deje el impuesto igual, "
+            "porque normalmente implica otra tarifa.")
     else:
         partes.append(
             "Ninguna excepcion tiene impacto cuantificado en el impuesto a "

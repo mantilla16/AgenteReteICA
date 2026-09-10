@@ -88,3 +88,16 @@ class ResultadoControl:
     @property
     def paso(self) -> bool:
         return self.estado is Estado.OK
+
+
+def etiqueta_estado(resultado) -> str:
+    """Como se muestra el estado de un control en el papel.
+
+    V6: C14 mostraba 'NO EJECUTADO' en la columna de estado y 'no aplica' en
+    el detalle -- el papel decia las dos cosas a la vez. Un control que el
+    municipio no exige NO es un control sin ejecutar: confundirlos degrada la
+    conclusion, que es justo lo que el campo `aplica` existe para evitar.
+    """
+    if not resultado.aplica:
+        return "NO APLICA"
+    return resultado.estado.value
