@@ -266,6 +266,84 @@ def _depositar_facturas(libro, ctx) -> None:
 # BALANCE, que el propio motor deposito. La trazabilidad ya existe.
 
 
+_BORRADOR = ("BORRADOR TERLICA", 10, 27)
+# Fila libre despues de la liquidacion (B40 es el ultimo texto de la
+# plantilla), para avisar de los grupos que no caben sin pisar nada.
+_AVISO_SIN_CUPO = 42
+
+
+def _depositar_borrador_terlica(libro, ctx) -> None:
+    """La reconstruccion renglon por renglon, sobre la forma del formulario.
+
+    B1..B8 y sus tarifas son la ESTRUCTURA del formulario municipal, no dato
+    nuestro: no se tocan. El motor llena las columnas de datos en la fila
+    cuya tarifa corresponde al grupo.
+
+    Si un mes trae mas grupos de una tarifa que filas disponibles para ella
+    -- el caso de 3.2 en version Excel -- los que no caben se DECLARAN en la
+    hoja. Descartarlos en silencio daria un papel que cuadra de menos sin
+    decir por que.
+    """
+    hoja = libro[_BORRADOR[0]]
+    inicio, fin = _BORRADOR[1], _BORRADOR[2]
+
+    # Solo las columnas de DATOS: B y C son la estructura del formulario.
+    # Y solo hasta `fin`: de la fila 28 en adelante vive la LIQUIDACION del
+    # formulario (TOTAL PAGO O ABONO, sanciones, saldo a pagar). Borrar ahi
+    # destruiria la estructura del papel, no datos del mes.
+    _limpiar(hoja, inicio, fin, range(4, 12))
+    for columna in (4, 5, 8):
+        hoja.cell(row=fin + 1, column=columna).value = None
+    hoja.cell(row=_AVISO_SIN_CUPO, column=2).value = None
+
+    # Filas disponibles por tarifa, segun la propia plantilla.
+    libres = {}
+    for fila in range(inicio, fin + 1):
+        por_mil = hoja.cell(row=fila, column=3).value
+        if isinstance(por_mil, (int, float)):
+            libres.setdefault(float(por_mil), []).append(fila)
+
+    sin_cupo = []
+    ultima = inicio - 1
+    for grupo in sorted(ctx.reconstruccion.por_grupo.values(),
+                        key=lambda g: -g.retencion_contable):
+        por_mil = float(grupo.tarifa) * 1000
+        disponibles = libres.get(por_mil, [])
+        if not disponibles:
+            sin_cupo.append(grupo)
+            continue
+        fila = disponibles.pop(0)
+        ultima = max(ultima, fila)
+
+        hoja.cell(row=fila, column=8, value=int(grupo.retencion_contable))
+        # D, E y G se recalculan solas a partir de H: el papel esta vivo.
+        divisor = por_mil / 10
+        hoja.cell(row=fila, column=4, value="=+ROUND(G%d,-3)" % fila)
+        hoja.cell(row=fila, column=5, value="=+ROUND(H%d,-3)" % fila)
+        hoja.cell(row=fila, column=7,
+                  value="=+H%d/%s*100" % (fila, ("%g" % divisor)))
+
+        renglon = (ctx.reconstruccion.mapa or {}).get(grupo.clave)
+        conceptos = [l.concepto for l in ctx.lineas if l.nit == grupo.nit]
+        hoja.cell(row=fila, column=9, value=conceptos[0] if conceptos else None)
+        if renglon:
+            hoja.cell(row=fila, column=10, value=int(renglon))
+        hoja.cell(row=fila, column=11, value=grupo.nit)
+
+    hoja.cell(row=fin + 1, column=4, value="=SUM(D%d:D%d)" % (inicio, fin))
+    hoja.cell(row=fin + 1, column=5, value="=SUM(E%d:E%d)" % (inicio, fin))
+    hoja.cell(row=fin + 1, column=8, value="=SUM(H%d:H%d)" % (inicio, fin))
+
+    if sin_cupo:
+        detalle = "; ".join(
+            "NIT %s al %s por mil por %s"
+            % (g.nit, "%g" % (float(g.tarifa) * 1000), int(g.retencion_contable))
+            for g in sin_cupo)
+        hoja.cell(row=_AVISO_SIN_CUPO, column=2,
+                  value="NO CUPO en la estructura del formulario: %s. "
+                        "El total de arriba NO los incluye." % detalle)
+
+
 def _depositar_revision_ica(libro, ctx) -> None:
     """D11 y D12.
 
@@ -320,6 +398,7 @@ def depositar(ctx, destino, plantilla: Path = None) -> Path:
     _depositar_check_list(libro, ctx)
     _depositar_declaracion(libro, ctx)
     _depositar_facturas(libro, ctx)
+    _depositar_borrador_terlica(libro, ctx)
     _depositar_revision_ica(libro, ctx)
 
     return guardar_conservando_formato(libro, plantilla, Path(destino))

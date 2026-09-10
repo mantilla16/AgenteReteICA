@@ -7,6 +7,7 @@ from motor_reteica.ia.cliente import (MODELO_POR_DEFECTO, VARIABLE_LLAVE,
                                       ClienteIA)
 from motor_reteica.identidad import IdentidadIncompatible
 from motor_reteica.papel_excel import generar_papel
+from motor_reteica.plantilla.deposito import depositar
 from motor_reteica.parametros.municipios.santa_marta import MUNICIPIO
 from motor_reteica.pipeline import revisar
 from motor_reteica.semaforo import evaluar
@@ -79,6 +80,11 @@ def main(argv=None) -> int:
     parser.add_argument("--municipio", default="santa_marta",
                         choices=sorted(MUNICIPIOS))
     parser.add_argument("--salida", default="papel_reteica.xlsx")
+    parser.add_argument("--formato", choices=("plantilla", "propio"),
+                        default="plantilla",
+                        help="'plantilla' deposita en el papel real de la "
+                             "firma (etapa 6, por defecto); 'propio' genera "
+                             "el libro que arma el motor. Ver D10.")
     parser.add_argument("--revision-inteligente", action="store_true",
                         help="ejecuta los controles de IA (IA-1, IA-3). "
                              "Requiere la llave en %s o --api-key."
@@ -104,7 +110,10 @@ def main(argv=None) -> int:
         return 2
 
     _tablero(ctx)
-    ruta = generar_papel(args.salida, ctx)
+    if args.formato == "plantilla":
+        ruta = depositar(ctx, args.salida)
+    else:
+        ruta = generar_papel(args.salida, ctx)
     print("\nPapel de trabajo generado en %s" % ruta)
     return _codigo_de_salida(ctx.informe)
 
