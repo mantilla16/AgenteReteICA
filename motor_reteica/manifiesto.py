@@ -25,7 +25,7 @@ JSON (una afirmacion: "no lo entrego"), nunca por ausencia de la llave
 """
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 ROLES_OBLIGATORIOS = ("borrador", "auxiliar")
@@ -48,6 +48,13 @@ class Manifiesto:
     declarado_por: str
     fecha: str
     archivos: dict  # rol -> nombre de archivo, o None si el cliente no lo entrego
+    # rol -> procedencia declarada por quien armo el manifiesto.
+    # verificar_tipo_documento (1.5) comprueba la ESTRUCTURA de un archivo,
+    # nunca su PROCEDENCIA: un export con las columnas correctas pasa sin
+    # importar quien lo produjo. Lo unico que puede declarar de donde salio
+    # de verdad una fuente es la persona que arma el manifiesto -- y si esa
+    # declaracion no llega al papel, no le sirve a nadie.
+    notas: dict = field(default_factory=dict)
 
 
 def _plantilla() -> dict:
@@ -107,8 +114,15 @@ def leer_manifiesto(carpeta: Path) -> Manifiesto:
         raise ManifiestoIncompleto(
             "%s no declara: %s" % (NOMBRE_ARCHIVO, ", ".join(faltantes_identidad)))
 
+    # Cualquier clave "_nota_<rol>" es la procedencia declarada de esa fuente.
+    # Se conserva y termina impresa en la hoja Parametros del papel: una nota
+    # que se queda en el JSON no la lee el socio que firma.
+    notas = {clave[len("_nota_"):]: str(valor).strip()
+             for clave, valor in datos.items()
+             if clave.startswith("_nota_") and str(valor).strip()}
+
     return Manifiesto(
         nit=datos["nit"], periodo=datos["periodo"], municipio=datos["municipio"],
         declarado_por=datos["declarado_por"], fecha=datos["fecha"],
-        archivos=archivos,
+        archivos=archivos, notas=notas,
     )

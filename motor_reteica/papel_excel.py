@@ -294,6 +294,23 @@ def _hoja_parametros(libro, ctx):
         fila = _fila(hoja, fila,
                      [clave, "obtenido" if clave in ctx.insumos_obtenidos
                       else "NO OBTENIDO"])
+
+    # La huella SHA256 prueba que el archivo no cambio, pero NO dice de donde
+    # salio. verificar_tipo_documento comprueba estructura, no procedencia: un
+    # export con las columnas correctas pasa sin importar quien lo produjo.
+    # Si quien armo el manifiesto declaro la procedencia de una fuente, el
+    # socio que firma tiene que leerla aqui y no en un JSON.
+    notas = getattr(ctx.manifiesto, "notas", None) if ctx.manifiesto else None
+    if notas:
+        fila += 1
+        fila = _encabezados(hoja, fila,
+                            ["PROCEDENCIA DECLARADA DE LAS FUENTES", "DECLARACION"])
+        for rol, nota in sorted(notas.items()):
+            fila_actual = fila
+            fila = _fila(hoja, fila, [rol, nota])
+            hoja.cell(row=fila_actual, column=2).alignment = Alignment(
+                wrap_text=True, vertical="top")
+
     _nota_alcance(hoja, fila)
 
 
