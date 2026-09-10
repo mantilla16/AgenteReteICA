@@ -89,9 +89,32 @@ def _exigir(bloque, campo, contexto):
     return valor
 
 
+def _en_blanco(entrada, campos) -> bool:
+    """Una fila de la plantilla que nadie lleno.
+
+    La plantilla se entrega con marcadores vacios. Una fila intacta significa
+    "todavia no lo he declarado" -- y entonces el control que dependa de ella
+    queda NO EJECUTADO, que es lo correcto -- no "el archivo es invalido".
+    Rechazar el archivo entero por una fila sin llenar bloquearia la corrida
+    por algo que el auditor deliberadamente dejo pendiente.
+
+    Una fila a MEDIO llenar si es un error y se sigue rechazando.
+    """
+    return all(str(entrada.get(campo, "")).strip() == "" for campo in campos)
+
+
+# Solo los campos que llena LA PERSONA. La plantilla trae ya puestos los que
+# el motor conoce (el codigo de actividad, el numero de cuenta), asi que
+# mirarlos haria que ninguna fila pareciera nunca intacta.
+_CAMPOS_TARIFA = ("tarifa", "vigencia_desde", "acuerdo", "articulo")
+_CAMPOS_CUENTA = ("naturaleza", "motivo")
+
+
 def _leer_tarifas(crudo) -> dict:
     tarifas = {}
     for entrada in crudo:
+        if _en_blanco(entrada, _CAMPOS_TARIFA):
+            continue
         contexto = "tarifa de la actividad %r" % entrada.get("actividad", "?")
         atestada = TarifaAtestada(
             municipio=_exigir(entrada, "municipio", contexto),
@@ -108,6 +131,8 @@ def _leer_tarifas(crudo) -> dict:
 def _leer_cuentas(crudo) -> dict:
     cuentas = {}
     for entrada in crudo:
+        if _en_blanco(entrada, _CAMPOS_CUENTA):
+            continue
         contexto = "cuenta %r" % entrada.get("cuenta", "?")
         naturaleza = _exigir(entrada, "naturaleza", contexto)
         if naturaleza not in _NATURALEZAS:
@@ -140,6 +165,29 @@ def leer_atestacion(carpeta) -> Atestacion:
         tarifas=_leer_tarifas(crudo.get("tarifas", [])),
         cuentas=_leer_cuentas(crudo.get("cuentas", [])),
     )
+
+
+NOMBRE_PLANTILLA = "atestacion.plantilla.json"
+
+
+def escribir_plantilla(carpeta, municipio: str, actividades,
+                       cuentas_candidatas) -> Path:
+    """Deja lista la plantilla para que el auditor la complete (D2).
+
+    Sin esto habia que redactar atestacion.json a mano, y por eso nadie
+    atesto nunca: X1 quedaba como mecanismo sin usar y C7 en NO EJECUTADO
+    mes tras mes.
+
+    NO sobreescribe una atestacion real ya hecha, y se escribe aparte
+    (atestacion.plantilla.json) para que completarla sea un paso deliberado:
+    renombrarla es la firma.
+    """
+    ruta = Path(carpeta) / NOMBRE_PLANTILLA
+    ruta.write_text(
+        json.dumps(plantilla(municipio, actividades, cuentas_candidatas),
+                   ensure_ascii=False, indent=2),
+        encoding="utf-8")
+    return ruta
 
 
 def plantilla(municipio: str, actividades, cuentas_candidatas) -> dict:

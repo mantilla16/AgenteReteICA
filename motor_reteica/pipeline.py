@@ -18,7 +18,8 @@ from decimal import Decimal
 from pathlib import Path
 
 from motor_reteica import controles
-from motor_reteica.atestacion import leer_atestacion
+from motor_reteica.atestacion import (NOMBRE_ARCHIVO as ATESTACION_ARCHIVO,
+                                      escribir_plantilla, leer_atestacion)
 from motor_reteica.hallazgos import consolidar
 from motor_reteica.ia import controles_ia
 from motor_reteica.identidad import (IdentidadIncompatible, huella,
@@ -253,6 +254,15 @@ def revisar(carpeta, nit, periodo, municipio,
 
     mapa = _mapa_actividad(borrador, filas_erp, lineas, municipio)
     recon = reconstruir(lineas, filas_erp, municipio, mapa)
+
+    # D2: si nadie ha atestado, el motor deja la plantilla lista con las
+    # actividades que el borrador declara. Pedir 5 tarifas es razonable;
+    # pedirle a alguien que redacte JSON a mano es por lo que X1 llevaba
+    # meses sin usarse.
+    if not (carpeta / ATESTACION_ARCHIVO).exists():
+        escribir_plantilla(carpeta, municipio.nombre,
+                           [a.codigo for a in borrador.actividades],
+                           candidatas_sin_declarar)
 
     resultados = [
         c0,
