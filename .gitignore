@@ -7,3 +7,5 @@ __pycache__/
 *.exe
 papel_reteica_*
 !papel_reteica_*.xlsx
+web/_muestra.json
+_arranque_prueba.py
