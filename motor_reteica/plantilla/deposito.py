@@ -177,10 +177,20 @@ def _depositar_balance(libro, ctx) -> None:
     El motor unicamente valida esas cuentas (C2). Depositar las 349 filas del
     balance completo pondria en el papel cifras que nunca miro, dando a
     entender que las reviso.
+
+    LAS FILAS SE MUESTRAN A MANO. La plantilla viene con 338 de sus 345 filas
+    de balance OCULTAS: la firma las colapso al archivar el mes anterior.
+    El motor escribia las cuentas 2368 desde la fila 5, que es justo donde
+    empieza lo oculto, asi que el deposito funcionaba y el resultado se veia
+    vacio. Las que se llenan se muestran; las que quedan sin datos se ocultan,
+    para que la hoja termine donde termina la evidencia y no arrastre
+    trescientas filas en blanco.
     """
     hoja = libro[_BALANCE[0]]
     inicio, fin = _BALANCE[1], _BALANCE[2]
     _limpiar(hoja, inicio, fin, range(2, 11))
+    for f in range(inicio, fin + 1):
+        hoja.row_dimensions[f].hidden = True
 
     hoja.cell(row=3, column=2,
               value="EXTRACTO de la cuenta 2368 del balance de prueba. No es "
@@ -189,10 +199,12 @@ def _depositar_balance(libro, ctx) -> None:
     if not ctx.saldos:
         hoja.cell(row=inicio, column=3,
                   value="NO EJECUTADO: no se obtuvo el balance de prueba")
+        hoja.row_dimensions[inicio].hidden = False
         return
 
     fila = inicio
     for cuenta, saldo in sorted(ctx.saldos.items()):
+        hoja.row_dimensions[fila].hidden = False
         hoja.cell(row=fila, column=2, value="DA09")
         hoja.cell(row=fila, column=3, value=cuenta)
         hoja.cell(row=fila, column=4,
@@ -318,11 +330,17 @@ def _depositar_borrador_terlica(libro, ctx) -> None:
     hoja = libro[_BORRADOR[0]]
     inicio, fin = _BORRADOR[1], _BORRADOR[2]
 
-    # Solo las columnas de DATOS: B y C son la estructura del formulario.
+    # Solo las columnas de DATOS. Esto se limpiaba desde la D y era un error:
+    # D, E y F NO son datos del mes, son formulas del formulario --
+    # D=+ROUND(Gn,-3), E=+ROUND(Hn,-3) y en dos filas F lleva sumas cruzadas
+    # (=+G17+G16, =+G20+G21+G25). Borrarlas dejaba el formulario mutilado:
+    # las columnas BASE e IMPTO RTE ICA salian vacias en toda fila que el mes
+    # no llenara, y las dos sumas cruzadas desaparecian para siempre.
+    #
     # Y solo hasta `fin`: de la fila 28 en adelante vive la LIQUIDACION del
     # formulario (TOTAL PAGO O ABONO, sanciones, saldo a pagar). Borrar ahi
     # destruiria la estructura del papel, no datos del mes.
-    _limpiar(hoja, inicio, fin, range(4, 12))
+    _limpiar(hoja, inicio, fin, range(7, 12))
     for columna in (4, 5, 8):
         hoja.cell(row=fin + 1, column=columna).value = None
     hoja.cell(row=_AVISO_SIN_CUPO, column=2).value = None
@@ -348,9 +366,10 @@ def _depositar_borrador_terlica(libro, ctx) -> None:
 
         hoja.cell(row=fila, column=8, value=int(grupo.retencion_contable))
         # D, E y G se recalculan solas a partir de H: el papel esta vivo.
+        # D y E ya no se reescriben: la plantilla las trae, son suyas, y
+        # escribirlas solo en las filas que el mes usa era lo que dejaba las
+        # demas en blanco.
         divisor = por_mil / 10
-        hoja.cell(row=fila, column=4, value="=+ROUND(G%d,-3)" % fila)
-        hoja.cell(row=fila, column=5, value="=+ROUND(H%d,-3)" % fila)
         hoja.cell(row=fila, column=7,
                   value="=+H%d/%s*100" % (fila, ("%g" % divisor)))
 

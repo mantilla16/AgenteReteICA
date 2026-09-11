@@ -51,6 +51,28 @@ _PARTES_CON_VALORES = re.compile(
 # deja apuntando a un grafo que ya no existe.
 _DESCARTAR = "xl/calcChain.xml"
 
+
+def _forzar_recalculo(xml: str) -> str:
+    """Marca el libro para que Excel recalcule TODO al abrirlo.
+
+    Sin esto el papel se abre en blanco donde deberia haber cifras, y esa es
+    la peor forma de fallar que tiene: no avisa, parece un papel vacio.
+
+    openpyxl escribe las formulas pero no sus resultados, y aqui ademas se
+    descarta calcChain.xml. Un Excel sin valores en cache y sin cadena de
+    calculo no siempre reconstruye el grafo solo: muestra la celda vacia
+    hasta que algo lo obligue. `fullCalcOnLoad` es ese algo.
+
+    Afecta a REVISION ICA --que es casi toda formulas-- y a las columnas de
+    BASE e IMPTO del borrador.
+    """
+    if "fullCalcOnLoad" in xml:
+        return xml
+    if "<calcPr" in xml:
+        return re.sub(r"<calcPr([^>]*?)/>",
+                      r'<calcPr\1 fullCalcOnLoad="1"/>', xml, count=1)
+    return xml.replace("</workbook>", '<calcPr fullCalcOnLoad="1"/></workbook>')
+
 # Elementos de cola de una hoja que openpyxl no reescribe y que referencian
 # partes del paquete (dibujos, impresora). Si no se remiendan, el logo y la
 # configuracion de impresion quedan huerfanos aunque el archivo si los tenga.
@@ -138,6 +160,9 @@ def guardar_conservando_formato(libro, plantilla: Path, destino: Path) -> Path:
                             contenido = _remendar_hoja(
                                 contenido, originales[nombre].decode("utf-8"))
                         salida.writestr(nombre, contenido)
+                    elif nombre == "xl/workbook.xml":
+                        salida.writestr(nombre, _forzar_recalculo(
+                            originales[nombre].decode("utf-8")))
                     else:
                         salida.writestr(nombre, originales[nombre])
 
