@@ -2,7 +2,7 @@
 
 El auditor sube los archivos del cliente y recibe el papel de trabajo. Esta
 capa NO reimplementa el motor: llama a las MISMAS funciones que la CLI
-(motor_reteica.pipeline.revisar, motor_reteica.papel_excel.generar_papel) y
+(motor_reteica.pipeline.revisar, motor_reteica.plantilla.deposito.depositar) y
 traduce el resultado a JSON. Nunca muestra una traza de Python al frontend.
 
 El unico trabajo propio de este modulo es RESOLVER EL MANIFIESTO por el
@@ -37,7 +37,7 @@ from ..ingesta._io import leer_filas
 from ..ingesta.borrador_pdf import leer_borrador
 from ..ingesta.formato_historico import normalizar_periodo
 from ..manifiesto import NOMBRE_ARCHIVO, ManifiestoIncompleto
-from ..papel_excel import generar_papel
+from ..plantilla.deposito import depositar
 from ..parametros.columnas import ColumnaNoIdentificada, detectar_tipo_documento
 from ..parametros.municipios.santa_marta import MUNICIPIO
 from ..pipeline import revisar
@@ -246,8 +246,12 @@ async def analizar(
             AtestacionInvalida, FileNotFoundError) as error:
         raise HTTPException(400, str(error))
 
+    # Etapa 6: el entregable es el papel de trabajo REAL de la firma, no el
+    # libro que se inventaba el motor. El CLI ya lo hacia (--formato
+    # plantilla, por defecto) y la interfaz web se quedo atras entregando el
+    # formato viejo -- que es el que ve el usuario que abre el .exe.
     salida = carpeta / ("PT_ReteICA_%s.xlsx" % corr)
-    generar_papel(salida, ctx)
+    depositar(ctx, salida)
     _PAPELES[corr] = salida
 
     resumen = _resumen(ctx)

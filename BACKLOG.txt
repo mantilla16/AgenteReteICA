@@ -19,7 +19,7 @@ ESTADO REAL (leer esto antes que nada)
                        https://github.com/Frios89/Agente_ReteICA.git main
                    (nunca 'git push' a secas desde excelrix)
 
-Linea base de no-regresion: 294 pruebas verdes y las anclas de Terlica julio
+Linea base de no-regresion: 379 pruebas verdes y las anclas de Terlica julio
              2026 (spec seccion 10.1) exactas. Cualquier cambio que las rompa
              se revierte.
 
@@ -1456,13 +1456,31 @@ V6 [CONFIRMADA] C14 muestra estado contradictorio: "NO EJECUTADO" en la
    columna de estado y "no aplica" en el detalle. Son cosas distintas y el
    papel dice las dos.
 
-V7 [CONFIRMADA, DE DISENO] Convergencia C6 + IA-1 sobre los mismos
-   documentos. Dos controles independientes senalando el mismo error es
-   corroboracion, no dos observaciones sueltas. Deberia consolidarse.
+V7 [HECHO] Convergencia C6 + IA-1 sobre los mismos documentos. Dos
+   controles independientes senalando el mismo error es corroboracion, no
+   dos observaciones sueltas.
+   COMO: Excepcion gana el campo `documento` -- distinto de renglon, cuenta
+   o NIT, porque un documento no es ninguno de esos -- y consolidar() agrupa
+   los senalados por DOS O MAS controles distintos y los nombra en la
+   conclusion. Verificado contra los datos reales: FE10 (C11 y C6) y
+   FE338043 (C6 e IA-1), exactamente lo que IA-3 senalo a mano.
+   LO QUE NO SE HIZO Y POR QUE: no se suben a HALLAZGO. Sin impacto
+   cuantificado no hay hallazgo (seccion 7), y con C7 sin ejecutar el
+   impacto es indeterminado (V4). Ademas reescribir la severidad que emitio
+   un control le quitaria al control su propio veredicto. La convergencia
+   se NOMBRA; la severidad la siguen decidiendo los controles.
 
-V8 [CONFIRMADA, DE DISENO] Tasa de excepcion 3 de 3 en la muestra de
-   clasificacion. Una tasa del 100% es un hallazgo de proceso, no tres
-   incidencias. El papel no reporta cobertura ni tasa.
+V8 [HECHO] Tasa de excepcion. El papel no decia sobre cuantos documentos se
+   juzgo, asi que tres incidencias y una falla de proceso se leian igual.
+   COMO: consolidar() recibe `documentos_revisados` (los documentos con
+   referencia del auxiliar) y publica la cobertura. La corrida real dice
+   "4 de 12".
+   DIFERENCIA DELIBERADA CON IA-3, que hablaba de 3 de 3: el denominador es
+   la poblacion real del auxiliar, no la muestra de facturas. Y solo al
+   100% se afirma que apunta a una deficiencia de PROCESO: un umbral
+   intermedio (digamos, mas de la mitad) seria criterio de auditoria y lo
+   decide Felipe, no el motor.
+   Pruebas: tests/test_convergencia_y_tasa.py (8).
 
 V9 [EXPLICABLE, FALTA DECIRLO] "C8 OK pero hay desfase de fecha". Es correcto
    por diseno -- C8 mira el auxiliar, el desfase solo existe contra el PDF y
