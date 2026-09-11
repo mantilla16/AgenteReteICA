@@ -67,7 +67,13 @@ def test_el_papel_de_la_api_conserva_el_logo(descargado):
     assert "xl/media/image1.emf" in partes
 
 
-def test_las_referencias_entre_hojas_son_formulas_no_valores(descargado):
-    """D11: si otro mes trae una fila mas, un valor pegado mentiria."""
+def test_el_papel_de_la_api_trae_las_cifras_del_motor(descargado):
+    """D11, version final: lo que cruza de hoja va como numero.
+
+    Antes esta prueba exigia que F20 fuera un SUMIF. Con formula, lo unico
+    verificable era la cadena; el numero podia salir en blanco o en #N/D y
+    la prueba seguia en verde. Ahora se comprueba la cifra.
+    """
     hoja = openpyxl.load_workbook(descargado)["REVISION ICA"]
-    assert str(hoja["F20"].value or "").startswith("=SUMIF(")
+    assert isinstance(hoja["F20"].value, (int, float)), hoja["F20"].value
+    assert hoja["N12"].value + hoja["N13"].value == 474561

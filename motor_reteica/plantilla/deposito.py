@@ -397,9 +397,29 @@ def _depositar_borrador_terlica(libro, ctx) -> None:
 def _depositar_revision_ica(libro, ctx) -> None:
     """D11 y D12.
 
-    D11: las referencias que cruzan hojas se anclan al SIGNIFICADO. Siguen
-    siendo formulas -- el papel esta vivo -- pero ya no dependen de que la
-    cuenta 2368010007 caiga justo en la fila 157 del balance.
+    D11: las referencias que cruzan hojas las RESUELVE EL MOTOR y deposita el
+    numero. La plantilla traia =+BALANCE!I157, que apunta a una fila concreta
+    y miente el mes que el balance trae una cuenta mas. La primera solucion
+    fue cambiarlas por VLOOKUP contra el numero de cuenta -- el papel seguia
+    vivo -- y costo dos defectos seguidos que no tienen nada que ver con
+    ReteICA: el libro se abria sin recalcular y la hoja salia en blanco, y
+    cuando por fin recalculo devolvio #N/D porque el motor escribe la cuenta
+    como texto y el VLOOKUP buscaba un numero.
+
+    El motor ya hizo esa cuenta. Que Excel la repita solo agrega formas de
+    fallar que no son de auditoria, y ninguna prueba puede atraparlas:
+    openpyxl no evalua formulas, asi que lo unico verificable era que la
+    CADENA de la formula estuviera bien escrita. Por eso la suite entera
+    pasaba con el papel en blanco.
+
+    Lo que cruza de una hoja a otra va como VALOR. Se pierde que el papel se
+    recomponga solo si alguien edita el balance a mano, y eso es correcto:
+    editar la evidencia deberia obligar a volver a correr, no a que el papel
+    se rehaga sin que nadie lo note.
+
+    La aritmetica DE LA FIRMA no se toca: D20 =+M21, E20 =+O12+O13, los
+    =SUM de la fila 26 y los =ROUND siguen siendo formulas. Ese es su papel,
+    y la derivacion tiene que quedar a la vista.
 
     D12: G28 apuntaba a DECLARACION!J21, que esta vacia, y F28 estaba fija
     en 0. La fila TOTAL A PAGAR mostraba 474.000 de diferencia -- el
@@ -407,25 +427,20 @@ def _depositar_revision_ica(libro, ctx) -> None:
     todo es integro. Se corrige.
     """
     hoja = libro["REVISION ICA"]
-    inicio, fin = _BALANCE[1], _BALANCE[2]
-    decl_ini, decl_fin = _DECLARACION[1], _DECLARACION[2]
 
-    # Saldo del balance POR NUMERO DE CUENTA. Coincidencia exacta a
-    # proposito: si la cuenta no esta, VLOOKUP devuelve #N/A -- un error
-    # ruidoso. SUMIF devolveria 0 en silencio, que es justo lo que este
-    # proyecto no acepta.
+    # El saldo que el motor ya leyo del balance. Si la cuenta no esta, se
+    # DICE; antes el VLOOKUP daba #N/A, que era ruidoso a proposito, y un
+    # cero mudo en su lugar seria justo lo que este proyecto no acepta.
     for celda, cuenta in (("N12", "2368010007"), ("N13", "2368010010")):
-        hoja[celda] = ('=VLOOKUP(%s,BALANCE!$C$%d:$I$%d,7,FALSE)'
-                       % (cuenta, inicio, fin))
+        saldo = ctx.saldos.get(cuenta)
+        hoja[celda] = (int(saldo) if saldo is not None
+                       else "NO ESTA EN EL BALANCE: %s" % cuenta)
 
-    # Totales declarados: se suman las filas que TIENEN codigo de actividad,
-    # en vez de apuntar a la fila del total. Si el borrador trae 7
-    # actividades en vez de 5, la formula sigue sirviendo.
-    rango_codigo = "DECLARACION!$I$%d:$I$%d" % (decl_ini, decl_fin)
-    hoja["F20"] = '=SUMIF(%s,">0",DECLARACION!$K$%d:$K$%d)' % (
-        rango_codigo, decl_ini, decl_fin)
-    hoja["G20"] = '=SUMIF(%s,">0",DECLARACION!$L$%d:$L$%d)' % (
-        rango_codigo, decl_ini, decl_fin)
+    # Lo declarado: se suman TODAS las actividades del borrador, no la celda
+    # del total de la hoja. Si el borrador trae siete actividades en vez de
+    # cinco, la cifra sigue siendo la correcta, que era lo que buscaba D11.
+    hoja["F20"] = sum(int(a.base) for a in ctx.borrador.actividades)
+    hoja["G20"] = sum(int(a.impuesto) for a in ctx.borrador.actividades)
 
     # D12: la fila TOTAL A PAGAR compara contra el total declarado, no
     # contra una celda vacia.
