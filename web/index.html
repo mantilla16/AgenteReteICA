@@ -125,6 +125,13 @@ main { padding: 24px 0 60px; }
 .pestana .n { font-family: var(--font-mono); font-size: .7rem; opacity: .75; margin-left: 6px; }
 .hoja { margin-top: 18px; }
 
+/* Conclusion y cifras comparten fila; la tabla de excepciones va debajo, a
+   todo el ancho, que es lo que necesita. Antes cada una era su propia
+   pestana y cada pestana dejaba dos tercios de pantalla en blanco. */
+.resumen { display: grid; gap: 20px; }
+@media (min-width: 1180px) { .resumen .par { display: grid; gap: 20px;
+                                             grid-template-columns: minmax(0,1fr) 22rem; } }
+
 /* La tabla de excepciones hace scroll dentro de su panel, con el
    encabezado fijo, en vez de estirar la pagina. */
 .marco-tabla { overflow: auto; max-height: calc(100vh - 20rem); }
@@ -143,7 +150,18 @@ section.seccion { margin-top: 34px; }
 
 .files { margin-top: 12px; font-size: 13px; }
 .files span { display: inline-block; background: var(--cian-tenue); border: 1px solid var(--regla);
-              border-radius: 6px; padding: 4px 10px; margin: 3px; color: var(--tinta-media); }
+              border-radius: 6px; padding: 4px 10px; margin: 3px; color: var(--tinta-media);
+              max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+              vertical-align: bottom; }
+
+/* Los nombres de archivo del ERP no traen espacios
+   (base_S_P00_07000134_ICA_11ICADA0920260811090007_ICA V1.xlsx), asi que
+   sin tope de ancho empujaban la pastilla 132px FUERA del riel y se
+   montaban sobre el panel de controles. En el riel van uno por linea,
+   recortados con puntos suspensivos; el nombre completo queda en el
+   title, que es donde se consulta y no donde estorba. */
+.riel .files { display: grid; gap: 4px; max-height: 9.5rem; overflow-y: auto; }
+.riel .files span { margin: 0; display: block; }
 
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; }
 label { display: block; font-size: 12px; font-weight: 600; color: var(--tinta-media); margin-bottom: 4px; }
@@ -170,10 +188,38 @@ input:focus, select:focus { outline: none; border-color: var(--cian); box-shadow
 .chip-lila   { background: var(--lila-tenue);  color: var(--lila); }
 .chip-gris   { background: var(--papel-hondo); color: var(--tinta-media); }
 
-.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 14px; }
-.kpi { background: var(--papel-hondo); border: 1px solid var(--regla); border-radius: var(--radio-chico); padding: 14px; }
-.kpi .v { font-size: 1.15rem; font-weight: 700; color: var(--marca); }
-.kpi .l { font-size: 11px; color: var(--tinta-suave); text-transform: uppercase; margin-top: 3px; }
+/* Las cifras como cedula, no como mosaico de recuadros. Siete numeros en
+   siete cajas ocupaban media pantalla y no se podian comparar entre si;
+   en columna, alineados a la derecha y en tipografia tabular, la unidad
+   de mil cae bajo la unidad de mil y la diferencia se ve sin leer. */
+.cedula { border-top: 1px solid var(--regla); }
+.cedula .fila { display: flex; align-items: baseline; gap: 12px;
+                border-bottom: 1px solid var(--regla-fina); padding: 9px 0; }
+.cedula .fila:last-child { border-bottom: 0; }
+.cedula .l { font-size: 12px; color: var(--tinta-media); flex: 1; min-width: 0; }
+.cedula .v { font-size: .95rem; font-weight: 600; text-align: right; white-space: nowrap; }
+.cedula .fila.suma { border-top: 1px solid var(--regla); margin-top: 2px; }
+.cedula .fila.suma .l { font-weight: 600; color: var(--tinta); }
+
+/* La tira de los dieciseis controles. Es el unico grafico de la pagina y
+   dice lo que decide la conclusion: cuantos controles sostienen algo y
+   cuantos no llegaron a ejecutarse. Un control NO EJECUTADO no es un
+   control que paso; aqui se distingue de un vistazo. */
+.tira { display: flex; flex-wrap: wrap; gap: 4px; }
+.tira .celda { display: flex; flex-direction: column; align-items: center; gap: 3px;
+               min-width: 42px; padding: 6px 4px; border-radius: var(--radio-chico);
+               background: var(--papel-hondo); }
+.tira .celda .c { font-family: var(--font-mono); font-size: .7rem; color: var(--tinta-media); }
+.tira .celda .p { width: 100%; height: 4px; border-radius: 2px; }
+.tira .p.e-OK { background: var(--verde-vivo); }
+.tira .p.e-FALLA { background: var(--rojo); }
+.tira .p.e-NOEJ { background: var(--ambar); }
+.tira .p.e-ATEST { background: var(--lila); }
+.tira .p.e-NA { background: var(--regla); }
+.leyenda { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 10px;
+           font-size: 11px; color: var(--tinta-suave); }
+.leyenda i { display: inline-block; width: 18px; height: 4px; border-radius: 2px;
+             margin-right: 5px; vertical-align: middle; font-style: normal; }
 
 .aviso { display: flex; gap: 12px; border-radius: 12px; border-left: 4px solid; padding: 14px 16px; font-size: 14px; }
 .aviso.ok    { border-color: var(--verde); background: var(--verde-tenue); color: var(--verde); }
@@ -182,13 +228,28 @@ input:focus, select:focus { outline: none; border-color: var(--cian); box-shadow
 .aviso .cuerpo { color: var(--tinta-media); font-weight: 400; }
 .aviso b { color: inherit; }
 
-.control { display: flex; gap: 12px; border-bottom: 1px solid var(--regla-fina); padding: 12px 0; }
+.control { border-bottom: 1px solid var(--regla-fina); padding: 9px 0; }
 .control:last-child { border-bottom: none; }
-.control .marca-check { width: 22px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
-.control .cuerpo { min-width: 0; flex: 1; }
-.control .titulo { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: .875rem; font-weight: 600; }
+
+/* La marca va DENTRO de la linea del titulo, no en una columna aparte.
+   Como columna se alineaba con el borde de la fila y no con el texto: con
+   `align-items:center` caia en mitad de una fila de 103px --junto al
+   detalle, como si lo calificara a el-- y con `flex-start` quedaba 13px
+   por encima del titulo, porque el icono mide menos que la linea que
+   contiene la pastilla de estado. Dentro del renglon se alinea sola. */
+.control .marca-check { flex-shrink: 0; display: inline-flex; align-items: center;
+                        justify-content: center; width: 18px; }
+.control .titulo { display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+                   font-size: .875rem; font-weight: 600; }
+/* El detalle arranca bajo el texto del titulo, no bajo la marca. */
+.control .detalle-sangria { padding-left: 26px; }
+/* Los <p> traian el margen del navegador (16px arriba y abajo cada uno),
+   asi que cada control ocupaba 97px para dos lineas de texto y los
+   dieciseis sumaban 1671px de scroll. */
+.control p { margin: 0; }
 .control .titulo .cod { font-family: var(--font-mono); font-size: .75rem; color: var(--tinta-suave); }
-.control .detalle { margin-top: 3px; font-size: .78rem; line-height: 1.5; color: var(--tinta-media); }
+.control .detalle { margin-top: 3px; font-size: .78rem; line-height: 1.5; color: var(--tinta-media);
+                    max-width: 92ch; }
 
 @keyframes puntear { from { stroke-dashoffset: 24; } to { stroke-dashoffset: 0; } }
 .punteo path { stroke-dasharray: 24; animation: puntear .4s ease-out forwards; }
@@ -305,7 +366,7 @@ a.dl { display: inline-block; margin-top: 10px; text-decoration: none; }
         <div id="semaforo"></div>
 
         <div id="bloque-insumos">
-          <div class="rotulo" style="margin:18px 0 8px">Insumos</div>
+          <div class="rotulo" style="margin:18px 0 8px">Insumos <span id="n-insumos"></span></div>
           <div class="files" id="r-archivos" style="margin-top:0"></div>
         </div>
 
@@ -322,35 +383,60 @@ a.dl { display: inline-block; margin-top: 10px; text-decoration: none; }
 
       <div>
         <nav class="pestanas no-imprimir" id="pestanas">
-          <button class="pestana activa" data-hoja="conclusion">Conclusion</button>
+          <button class="pestana activa" data-hoja="resumen">Resumen</button>
           <button class="pestana" data-hoja="controles" id="b-controles">Controles<span class="n" id="n-controles"></span></button>
-          <button class="pestana" data-hoja="excepciones">Excepciones<span class="n" id="n-excepciones"></span></button>
-          <button class="pestana" data-hoja="cifras">Cifras</button>
         </nav>
 
-        <!-- La conclusion abre, y no cierra: quien revisa quiere saber en
-             que termino antes de recorrer como se llego ahi. -->
-        <section class="hoja" data-hoja="conclusion">
-          <div class="panel"><div class="concl" id="concl"></div></div>
-          <div id="aviso-clasificacion"></div>
+        <!-- Una sola hoja con lo que se mira junto: en que termino, con
+             que cifras, y que excepciones lo sostienen. Estaban repartidas
+             en tres pestanas y cada una dejaba dos tercios de pantalla en
+             blanco, lo que obligaba a ir y volver para cotejar una cifra
+             contra la frase que la menciona. -->
+        <section class="hoja resumen" data-hoja="resumen">
+
+          <div class="par">
+            <div>
+              <div class="panel" style="margin-bottom:0">
+                <div class="rotulo" style="margin-bottom:10px">Conclusion</div>
+                <div class="concl" id="concl"></div>
+              </div>
+              <div id="aviso-clasificacion"></div>
+            </div>
+
+            <div>
+              <div class="panel" style="margin-bottom:0">
+                <div class="rotulo" style="margin-bottom:6px">Cifras de la revision</div>
+                <div class="cedula" id="cedula"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel" style="margin-bottom:0">
+            <div class="rotulo" style="margin-bottom:10px">Los 16 controles</div>
+            <div class="tira" id="tira"></div>
+            <div class="leyenda">
+              <span><i style="background:var(--verde-vivo)"></i>paso</span>
+              <span><i style="background:var(--rojo)"></i>fallo</span>
+              <span><i style="background:var(--ambar)"></i>no se ejecuto</span>
+              <span><i style="background:var(--lila)"></i>atestado</span>
+              <span><i style="background:var(--regla)"></i>no aplica</span>
+            </div>
+          </div>
+
+          <div>
+            <div class="rotulo" style="margin-bottom:8px">Excepciones <span id="n-exc"></span></div>
+            <div class="panel" style="padding:0;margin-bottom:0">
+              <div class="marco-tabla"><table class="tabla" id="tabla-excepciones"></table></div>
+            </div>
+            <p id="sin-excepciones" class="hidden" style="color:var(--tinta-suave);font-size:13px;margin-top:12px">
+              Ningun control registro excepciones. Eso no equivale a una revision limpia:
+              revise cuantos controles quedaron sin ejecutar.
+            </p>
+          </div>
         </section>
 
         <section class="hoja hidden" data-hoja="controles">
           <div class="panel" id="controles"></div>
-        </section>
-
-        <section class="hoja hidden" data-hoja="excepciones">
-          <div class="panel" style="padding:0">
-            <div class="marco-tabla"><table class="tabla" id="tabla-excepciones"></table></div>
-          </div>
-          <p id="sin-excepciones" class="hidden" style="color:var(--tinta-suave);font-size:13px;margin-top:12px">
-            Ningun control registro excepciones. Eso no equivale a una revision limpia:
-            revise cuantos controles quedaron sin ejecutar.
-          </p>
-        </section>
-
-        <section class="hoja hidden" data-hoja="cifras">
-          <div class="kpis" id="kpis"></div>
         </section>
       </div>
 
@@ -393,6 +479,8 @@ function render(){ $("#files").innerHTML = archivos.map(f=>`<span>${f.name.endsW
 const fmt = n => (n==null?"—":new Intl.NumberFormat("es-CO",{maximumFractionDigits:0}).format(n));
 
 const TONO_ESTADO = { OK: "verde", FALLA: "rojo", "NO EJECUTADO": "ambar", ATESTADO: "lila" };
+const PASTILLA = { OK: "e-OK", FALLA: "e-FALLA", "NO EJECUTADO": "e-NOEJ",
+                   ATESTADO: "e-ATEST", "NO APLICA": "e-NA" };
 const TONO_SEMAFORO = { ROJO: "error", AMARILLO: "alerta", VERDE: "ok" };
 
 /* El gesto del lapiz sobre el control que paso, tomado del sistema de
@@ -454,7 +542,11 @@ function pintar(data){
   $("#r-periodo").textContent   = $("#periodo").value || "\u2014";
   $("#r-municipio").textContent = $("#municipio").selectedOptions[0].textContent;
   // Un rotulo "Insumos" sobre una lista vacia promete algo que no esta.
+  // La lista ocupaba 328px de los 829 del riel --el 40%-- por algo que se
+  // mira una vez. Se acota a cinco filas con scroll y el conteo pasa al
+  // rotulo, que es el dato que de verdad se consulta de un vistazo.
   $("#bloque-insumos").classList.toggle("hidden", archivos.length === 0);
+  $("#n-insumos").textContent = archivos.length ? `· ${archivos.length}` : "";
   $("#r-archivos").innerHTML    = archivos.map(f =>
     `<span>${f.name.endsWith(".pdf")?"\u{1F4C4}":"\u{1F4CA}"} ${f.name}</span>`).join("");
 
@@ -481,36 +573,52 @@ function pintar(data){
     : `Los ${R.controles.length} controles quedaron en OK`;
   $("#controles").innerHTML = R.controles.map(ctl => `
     <div class="control">
-      <div class="marca-check">${MARCA_ESTADO[ctl.estado] ?? ""}</div>
-      <div class="cuerpo">
-        <p class="titulo"><span class="cod">${ctl.codigo}</span> ${ctl.nombre}
-          <span class="chip chip-${TONO_ESTADO[ctl.estado] ?? "gris"}">${ctl.estado}</span></p>
-        <p class="detalle">${ctl.detalle}</p>
-      </div>
+      <p class="titulo">
+        <span class="marca-check">${MARCA_ESTADO[ctl.estado] ?? ""}</span>
+        <span class="cod">${ctl.codigo}</span> ${ctl.nombre}
+        <span class="chip chip-${TONO_ESTADO[ctl.estado] ?? "gris"}">${ctl.estado}</span>
+      </p>
+      <p class="detalle detalle-sangria">${ctl.detalle}</p>
     </div>`).join("");
 
   // ------------------------------------------------------- excepciones
   const hs = R.excepciones || [];
-  $("#n-excepciones").textContent = hs.length;
+  $("#n-exc").textContent = hs.length ? `· ${hs.length}` : "";
   $("#sin-excepciones").classList.toggle("hidden", hs.length > 0);
   $("#tabla-excepciones").innerHTML = hs.length ? `
     <thead><tr><th>Severidad</th><th>Control</th><th>Ref.</th><th>Descripcion</th><th>Impacto $</th></tr></thead>
     <tbody>${hs.map(h => `<tr><td class="sev-${h.severidad}">${h.severidad}</td><td>${h.control}</td>
       <td class="cifra" style="font-size:12px">${h.tipo_referencia?h.tipo_referencia+" "+h.renglon:""}</td>
-      <td>${h.descripcion}</td><td class="cifra">${fmt(h.impacto)}</td></tr>`).join("")}</tbody>` : "";
+      <td>${h.descripcion}</td><td class="cifra">${h.impacto ? fmt(h.impacto) : "\u2014"}</td></tr>`).join("")}</tbody>` : "";
+
+  // ------------------------------------------------- la tira de controles
+  $("#tira").innerHTML = R.controles.map(ctl => `
+    <div class="celda" title="${ctl.codigo}: ${ctl.nombre} — ${ctl.estado}">
+      <span class="c">${ctl.codigo}</span>
+      <span class="p ${PASTILLA[ctl.estado] ?? "e-NA"}"></span>
+    </div>`).join("");
 
   // ------------------------------------------------------------ cifras
   const c = R.cifras;
-  $("#kpis").innerHTML = `
-    <div class="kpi"><div class="v cifra">${fmt(c.auxiliar)}</div><div class="l">Auxiliar 2368</div></div>
-    <div class="kpi"><div class="v cifra">${fmt(c.erp)}</div><div class="l">Reporte del ERP</div></div>
-    <div class="kpi"><div class="v cifra">${fmt(c.base_gravable)}</div><div class="l">Base gravable</div></div>
-    <div class="kpi"><div class="v cifra">${fmt(c.impuesto_declarable)}</div><div class="l">Impuesto declarable</div></div>
-    <div class="kpi"><div class="v cifra">${fmt(c.declarado)}</div><div class="l">Declarado (renglon 24)</div></div>
-    <div class="kpi"><div class="v cifra">${fmt(R.impacto_total)}</div><div class="l">Impacto cuantificado</div></div>
-    <div class="kpi"><div class="v">${R.puede_concluir_limpio?"SI":"NO"}</div><div class="l">Conclusion limpia</div></div>`;
+  /* Un cero en "impacto cuantificado" se lee como "no hay impacto", y con
+     controles sin ejecutar eso es justo lo que el motor NO puede afirmar:
+     su propia conclusion dice INDETERMINADO. Cuando hay excepciones y
+     ninguna se pudo cuantificar, la celda lo dice con palabras. */
+  const impacto = R.impacto_total
+    ? fmt(R.impacto_total)
+    : ((R.excepciones || []).length ? "sin cuantificar" : fmt(0));
+  $("#cedula").innerHTML = `
+    <div class="fila"><span class="l">Auxiliar 2368</span><span class="v cifra">${fmt(c.auxiliar)}</span></div>
+    <div class="fila"><span class="l">Reporte del ERP</span><span class="v cifra">${fmt(c.erp)}</span></div>
+    <div class="fila"><span class="l">Base gravable</span><span class="v cifra">${fmt(c.base_gravable)}</span></div>
+    <div class="fila"><span class="l">Impuesto contable</span><span class="v cifra">${fmt(c.impuesto_contable)}</span></div>
+    <div class="fila"><span class="l">Impuesto declarable</span><span class="v cifra">${fmt(c.impuesto_declarable)}</span></div>
+    <div class="fila suma"><span class="l">Declarado (renglon 24)</span><span class="v cifra">${fmt(c.declarado)}</span></div>
+    <div class="fila"><span class="l">Impacto cuantificado</span><span class="v ${impacto?"cifra":""}"
+      title="${impacto?"":"Ninguna excepcion pudo cuantificarse en pesos. No es lo mismo que un impacto de cero."}"
+      >${impacto}</span></div>`;
 
-  mostrarHoja("conclusion");
+  mostrarHoja("resumen");
 }
 </script>
 </body>
