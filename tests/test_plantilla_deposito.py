@@ -195,9 +195,17 @@ def test_el_texto_de_la_cuenta_muestra_el_porcentaje_no_los_digitos(papel):
 
 
 def test_el_balance_tambien_muestra_el_porcentaje(papel):
+    """Solo las cuentas que entran a los cruces.
+
+    La hoja muestra ademas las EXCLUIDAS, y el texto de esas dice por que se
+    excluyeron, no su tarifa: una tarifa junto a una cuenta que no se cruzo
+    daria a entender que si se verifico.
+    """
     hoja = papel["BALANCE"]
     textos = [hoja.cell(row=f, column=4).value for f in range(5, 11)
-              if hoja.cell(row=f, column=4).value]
+              if hoja.cell(row=f, column=4).value
+              and not str(hoja.cell(row=f, column=4).value).startswith("EXCLUIDA")]
+    assert textos, "no quedo ninguna cuenta en el cruce"
     assert all("%" in t for t in textos), textos
     assert not any("00" in t.split()[-1] for t in textos), textos
 

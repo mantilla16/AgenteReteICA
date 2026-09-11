@@ -178,28 +178,37 @@ def _depositar_balance(libro, ctx) -> None:
     balance completo pondria en el papel cifras que nunca miro, dando a
     entender que las reviso.
 
-    LAS FILAS SE MUESTRAN A MANO. La plantilla viene con 338 de sus 345 filas
-    de balance OCULTAS: la firma las colapso al archivar el mes anterior.
-    El motor escribia las cuentas 2368 desde la fila 5, que es justo donde
-    empieza lo oculto, asi que el deposito funcionaba y el resultado se veia
-    vacio. Las que se llenan se muestran; las que quedan sin datos se ocultan,
-    para que la hoja termine donde termina la evidencia y no arrastre
-    trescientas filas en blanco.
+    LAS FILAS SOBRANTES SE BORRAN, no se ocultan. La plantilla viene con 338
+    de sus 345 filas de balance OCULTAS -- la firma las colapso al archivar el
+    mes anterior -- y el motor escribia justo ahi, asi que el deposito
+    funcionaba y la hoja se veia vacia. Ocultar las que sobran arreglaba eso
+    pero dejaba la numeracion saltando de la 9 a la 350, que se lee como una
+    hoja rota. Ahora se eliminan: la hoja termina donde termina la evidencia.
+    Se puede borrar filas porque ninguna formula apunta ya a esta hoja -- lo
+    que cruza de hoja lo deposita el motor como valor.
+
+    SE MUESTRAN TAMBIEN LAS CUENTAS EXCLUIDAS. El papel afirmaba que
+    2368010090 se trato como contrapartida de pago y esa cuenta no aparecia
+    por ningun lado: la exclusion no se podia verificar. Van al final, con su
+    saldo acumulado, que es la cifra por la que el motor las senala (M11).
     """
     hoja = libro[_BALANCE[0]]
     inicio, fin = _BALANCE[1], _BALANCE[2]
     _limpiar(hoja, inicio, fin, range(2, 11))
-    for f in range(inicio, fin + 1):
-        hoja.row_dimensions[f].hidden = True
 
     hoja.cell(row=3, column=2,
               value="EXTRACTO de la cuenta 2368 del balance de prueba. No es "
-                    "el balance completo: el motor solo verifica esas cuentas.")
+                    "el balance completo: el motor solo verifica esas "
+                    "cuentas. La columna que entra a los cruces es 'Saldo "
+                    "Haber per.inf.' -- el movimiento del periodo; el saldo "
+                    "acumulado se muestra solo como referencia, porque "
+                    "arrastra los periodos anteriores.")
 
     if not ctx.saldos:
         hoja.cell(row=inicio, column=3,
                   value="NO EJECUTADO: no se obtuvo el balance de prueba")
         hoja.row_dimensions[inicio].hidden = False
+        _recortar(hoja, inicio + 1, fin)
         return
 
     fila = inicio
@@ -212,7 +221,32 @@ def _depositar_balance(libro, ctx) -> None:
                       ctx.municipio.tarifa_por_cuenta.get(cuenta, 0)))
         hoja.cell(row=fila, column=5, value="COP")
         hoja.cell(row=fila, column=9, value=int(saldo))
+        acumulado = ctx.acumulados.get(cuenta)
+        if acumulado is not None:
+            hoja.cell(row=fila, column=10, value=int(acumulado))
         fila += 1
+
+    for cuenta in sorted(ctx.candidatas_sin_declarar):
+        hoja.row_dimensions[fila].hidden = False
+        hoja.cell(row=fila, column=2, value="DA09")
+        hoja.cell(row=fila, column=3, value=cuenta)
+        hoja.cell(row=fila, column=4,
+                  value="EXCLUIDA de los cruces: saldo de naturaleza debito, "
+                        "tratada como contrapartida de pago. Sin atestacion "
+                        "del auditor (M11).")
+        hoja.cell(row=fila, column=5, value="COP")
+        acumulado = ctx.acumulados.get(cuenta)
+        if acumulado is not None:
+            hoja.cell(row=fila, column=10, value=int(acumulado))
+        fila += 1
+
+    _recortar(hoja, fila, fin)
+
+
+def _recortar(hoja, desde: int, hasta: int) -> None:
+    """Quita las filas que quedaron sin datos, de abajo hacia arriba."""
+    if hasta >= desde:
+        hoja.delete_rows(desde, hasta - desde + 1)
 
 
 def _depositar_check_list(libro, ctx) -> None:

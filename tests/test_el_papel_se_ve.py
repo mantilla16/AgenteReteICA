@@ -40,10 +40,14 @@ BASE = Path(__file__).parent / "fixtures" / "terlica_202607"
 
 
 @pytest.fixture(scope="module")
-def ruta(tmp_path_factory):
-    ctx = revisar(BASE, nit="819002433", periodo="2026-07", municipio=MUNICIPIO)
+def contexto():
+    return revisar(BASE, nit="819002433", periodo="2026-07", municipio=MUNICIPIO)
+
+
+@pytest.fixture(scope="module")
+def ruta(contexto, tmp_path_factory):
     salida = tmp_path_factory.mktemp("ver") / "papel.xlsx"
-    depositar(ctx, salida)
+    depositar(contexto, salida)
     return salida
 
 
@@ -74,8 +78,13 @@ def test_el_libro_pide_recalcularse_al_abrirlo(ruta):
 # -------------------------------------------------------------------- balance
 
 def test_las_cuentas_del_balance_quedan_a_la_vista(libro):
+    # Hasta max_row y no hasta 350: en openpyxl, LEER hoja.cell(row=f) crea
+    # la celda, asi que recorrer de mas engorda la hoja y la prueba
+    # siguiente --que comprueba donde termina-- veia 349 filas. Una prueba
+    # contaminando a otra.
     hoja = libro["BALANCE"]
-    con_dato = [f for f in range(5, 350) if hoja.cell(row=f, column=3).value]
+    con_dato = [f for f in range(5, hoja.max_row + 1)
+                if hoja.cell(row=f, column=3).value]
     assert con_dato, "no se deposito ninguna cuenta"
     ocultas = [f for f in con_dato if hoja.row_dimensions[f].hidden]
     assert not ocultas, (
@@ -83,18 +92,56 @@ def test_las_cuentas_del_balance_quedan_a_la_vista(libro):
         "el papel se abre pareciendo vacio" % ocultas)
 
 
-def test_el_balance_no_arrastra_filas_vacias_visibles(libro):
-    """La hoja termina donde termina la evidencia.
+def test_el_balance_termina_donde_termina_la_evidencia(libro):
+    """Las filas sobrantes se BORRAN, no se ocultan.
 
-    Dejar visibles las trescientas y pico filas que quedaron sin datos hacia
-    que la hoja se leyera como un balance truncado.
+    Ocultarlas quitaba las filas en blanco pero dejaba la numeracion saltando
+    de la 9 a la 350, que se lee como una hoja rota. Borrarlas se puede
+    porque ninguna formula apunta ya a esta hoja: lo que cruza de hoja lo
+    deposita el motor como valor.
     """
     hoja = libro["BALANCE"]
-    sobrantes = [f for f in range(5, 350)
-                 if not hoja.cell(row=f, column=3).value
-                 and not hoja.row_dimensions[f].hidden]
-    assert not sobrantes[:1], (
-        "quedan filas vacias a la vista desde la %d" % (sobrantes[0] if sobrantes else 0))
+    con_dato = [f for f in range(5, hoja.max_row + 1)
+                if hoja.cell(row=f, column=3).value]
+    assert hoja.max_row == max(con_dato), (
+        "la hoja llega hasta la fila %d y la ultima cuenta esta en la %d"
+        % (hoja.max_row, max(con_dato)))
+    ocultas = [f for f in range(1, hoja.max_row + 1)
+               if hoja.row_dimensions[f].hidden]
+    assert not ocultas, "quedan filas ocultas: %s" % ocultas
+
+
+def test_la_cuenta_excluida_se_ve_con_la_cifra_que_la_delata(libro, contexto):
+    """El papel afirmaba una exclusion que el lector no podia verificar.
+
+    C13 avisa que 2368010090 se trato como contrapartida de pago por su
+    saldo, y esa cuenta no aparecia en ninguna hoja. Ahora va al final del
+    extracto con su saldo acumulado, que es la cifra por la que el motor la
+    senala: es la unica 2368 con saldo positivo.
+    """
+    if not contexto.candidatas_sin_declarar:
+        pytest.skip("este mes no hay cuentas excluidas por naturaleza")
+
+    hoja = libro["BALANCE"]
+    filas = {str(hoja.cell(row=f, column=3).value): f
+             for f in range(5, hoja.max_row + 1)
+             if hoja.cell(row=f, column=3).value}
+    for cuenta in contexto.candidatas_sin_declarar:
+        assert cuenta in filas, "la cuenta excluida %s no esta en el papel" % cuenta
+        fila = filas[cuenta]
+        assert "EXCLUIDA" in str(hoja.cell(row=fila, column=4).value)
+        assert hoja.cell(row=fila, column=10).value == int(contexto.acumulados[cuenta])
+        assert hoja.cell(row=fila, column=9).value is None, (
+            "una cuenta excluida no puede traer cifra en la columna que se cruza")
+
+
+def test_el_saldo_acumulado_llega_al_papel(libro, contexto):
+    """Se lee para M11 y antes moria en el motor: la columna salia vacia."""
+    hoja = libro["BALANCE"]
+    for f in range(5, hoja.max_row + 1):
+        cuenta = str(hoja.cell(row=f, column=3).value or "")
+        if cuenta in contexto.acumulados:
+            assert hoja.cell(row=f, column=10).value == int(contexto.acumulados[cuenta])
 
 
 # ------------------------------------------------------------------- borrador

@@ -22,6 +22,36 @@ CREDITO = "CREDITO"
 _ACUMULADO = "Saldo acumulado"
 
 
+def _columna_acumulado(filas, inicio):
+    for indice, celda in enumerate(filas[inicio]):
+        if _texto(celda) == _ACUMULADO:
+            return indice
+    return None
+
+
+def leer_acumulados(ruta: Path) -> dict:
+    """El saldo acumulado de cada cuenta 2368, tal como viene del export.
+
+    NO entra en ningun cruce -- arrastra todos los periodos anteriores y
+    usarlo haria fallar C2 siempre. Se lee para que el papel pueda MOSTRARLO:
+    es la cifra por la que el motor senala una cuenta como contrapartida de
+    pago (M11), y sin ella el papel afirma una exclusion que el lector no
+    puede verificar.
+    """
+    filas = leer_filas(ruta, hoja="BALANCE")
+    inicio, col = localizar_columnas(filas, ROLES_BALANCE, FIRMA_BALANCE)
+    columna = _columna_acumulado(filas, inicio)
+    if columna is None:
+        return {}
+
+    acumulados = {}
+    for fila in filas[inicio + 1:]:
+        cuenta = _texto(fila[col["cuenta"]])
+        if cuenta.startswith(CUENTA_RETEICA):
+            acumulados[cuenta] = Decimal(str(fila[columna] or 0))
+    return acumulados
+
+
 def leer_naturalezas(ruta: Path) -> dict:
     """M11: naturaleza de cada cuenta 2368, por el signo del saldo acumulado.
 
@@ -35,11 +65,7 @@ def leer_naturalezas(ruta: Path) -> dict:
     filas = leer_filas(ruta, hoja="BALANCE")
     inicio, col = localizar_columnas(filas, ROLES_BALANCE, FIRMA_BALANCE)
 
-    columna_acumulado = None
-    for indice, celda in enumerate(filas[inicio]):
-        if _texto(celda) == _ACUMULADO:
-            columna_acumulado = indice
-            break
+    columna_acumulado = _columna_acumulado(filas, inicio)
     if columna_acumulado is None:
         return {}
 

@@ -13,7 +13,7 @@ agregarles un manifiesto, y gran parte de la bateria de pruebas del motor
 corre directo contra esas fixtures sin pasar por manifiesto.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
 
@@ -24,7 +24,8 @@ from motor_reteica.ia import controles_ia
 from motor_reteica.identidad import (IdentidadIncompatible, huella,
                                      verificar_identidad, verificar_tipo_documento)
 from motor_reteica.ingesta.auxiliar import leer_auxiliar
-from motor_reteica.ingesta.balance import DEBITO, leer_balance, leer_naturalezas
+from motor_reteica.ingesta.balance import (DEBITO, leer_acumulados,
+                                            leer_balance, leer_naturalezas)
 from motor_reteica.ingesta.borrador_pdf import leer_borrador
 from motor_reteica.ingesta.formato_historico import (leer_formato_historico,
                                                      periodo_anterior)
@@ -67,6 +68,9 @@ class ContextoRevision:
     # Cuentas que el motor detecto como candidatas a contrapartida y que
     # nadie declaro. El llamador las usa para armar la plantilla (D2).
     candidatas_sin_declarar: frozenset = frozenset()
+    # Saldo acumulado de cada cuenta 2368, SOLO para mostrarlo en el papel.
+    # No entra en ningun cruce: arrastra los periodos anteriores.
+    acumulados: dict = field(default_factory=dict)
 
 
 _TOLERANCIA_REDONDEO = Decimal("1000")
@@ -222,6 +226,8 @@ def revisar(carpeta, nit, periodo, municipio,
     # auditor decide. Una candidata sin declarar bloquea C2 y C3.
     naturalezas = (leer_naturalezas(rutas["balance"])
                    if "balance" in presentes else {})
+    acumulados = (leer_acumulados(rutas["balance"])
+                  if "balance" in presentes else {})
     candidatas = {cuenta for cuenta, naturaleza in naturalezas.items()
                   if naturaleza == DEBITO}
     candidatas_sin_declarar = candidatas - set(atestacion.cuentas)
@@ -316,4 +322,5 @@ def revisar(carpeta, nit, periodo, municipio,
         manifiesto=manifiesto,
         atestacion=atestacion,
         candidatas_sin_declarar=frozenset(candidatas_sin_declarar),
+        acumulados=acumulados,
     )
