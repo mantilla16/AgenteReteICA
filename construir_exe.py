@@ -45,6 +45,30 @@ def _verificar_datos() -> None:
                          % ", ".join(faltan))
 
 
+def _limpiar_andamiaje() -> None:
+    """Borra build/ y el .spec, y avisa si no pudo.
+
+    No se aborta por esto: el .exe ya esta hecho y es lo que se venia a
+    buscar. Antes el borrado iba suelto dentro de main(), asi que si fallaba
+    --OneDrive sincronizando, un antivirus leyendo el .pkg-- la excepcion se
+    llevaba por delante el aviso de exito y dejaba 168MB de andamiaje en la
+    carpeta sin que nadie se enterara. Una vez llegaron a un commit, y el
+    .pkg de 125MB hizo que GitHub rechazara el push.
+
+    La red de verdad es el .gitignore; esto solo deja la carpeta limpia.
+    """
+    for basura in ("build", "%s.spec" % NOMBRE):
+        ruta = RAIZ / basura
+        try:
+            if ruta.is_dir():
+                shutil.rmtree(ruta)
+            else:
+                ruta.unlink(missing_ok=True)
+        except OSError as error:
+            print("No se pudo borrar %s: %s (queda ignorado por git)"
+                  % (ruta.name, error))
+
+
 def main() -> int:
     _verificar_datos()
     separador = ";" if sys.platform == "win32" else ":"
@@ -58,9 +82,7 @@ def main() -> int:
     print(" ".join(orden), "\n")
     codigo = subprocess.call(orden, cwd=str(RAIZ))
     if codigo == 0:
-        for basura in ("build", "%s.spec" % NOMBRE):
-            ruta = RAIZ / basura
-            shutil.rmtree(ruta) if ruta.is_dir() else ruta.unlink(True)
+        _limpiar_andamiaje()
         exe = RAIZ / ("%s.exe" % NOMBRE)
         print("\nListo: %s (%.0f MB)" % (exe, exe.stat().st_size / 1e6))
     return codigo

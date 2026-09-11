@@ -90,7 +90,13 @@ header { position: sticky; top: 3px; z-index: 20; border-bottom: 1px solid var(-
    horizontal. El tope sigue existiendo, pero para la PROSA: el
    formulario de carga no mejora por ser ancho, la rejilla de datos si. */
 .contenedor { max-width: 1560px; margin: 0 auto; padding: 0 24px; }
-main { padding: 24px 0 60px; }
+/* El encabezado es pegajoso y quedaba pisando el contenido. Va en
+   `main.contenedor` y no en `main` a secas: el atajo `padding` de
+   .contenedor (0 24px) pone el superior en CERO, y una clase le gana a un
+   selector de tipo. Con `main { padding: ... }` la regla se escribia y no
+   se aplicaba nunca -- asi llevaba desde que existe el contenedor. */
+main.contenedor { padding-top: 40px; padding-bottom: 60px; }
+header .cab { padding: 14px 0; }
 .angosto { max-width: 780px; margin: 0 auto; }
 
 /* ------------------------------------------------------- disposicion
@@ -115,8 +121,11 @@ main { padding: 24px 0 60px; }
 /* ---------------------------------------------------------- pestanas
    Pildoras, como en el resto del sistema: el estado activo se ve sin
    buscarlo. Reparten lo que antes eran cuatro secciones apiladas. */
-.pestanas { display: flex; flex-wrap: wrap; gap: 4px; background: var(--papel-hondo);
-            padding: 4px; border-radius: 999px; }
+/* inline-flex, no flex: con dos pestanas la barra se estiraba a los 1250px
+   del area de trabajo y dejaba un riel gris vacio a la derecha. Asi mide lo
+   que miden las pestanas. */
+.pestanas { display: inline-flex; flex-wrap: wrap; gap: 4px; background: var(--papel-hondo);
+            padding: 4px; border-radius: 999px; margin-bottom: 4px; }
 .pestana { border: 0; background: transparent; border-radius: 999px; cursor: pointer;
            padding: .45rem 1rem; font-family: var(--font-sans); font-size: .875rem;
            font-weight: 500; color: var(--tinta-suave); transition: .15s; }
@@ -147,6 +156,17 @@ section.seccion { margin-top: 34px; }
 .seccion-cab { margin-bottom: 12px; display: flex; align-items: baseline; gap: 10px; border-bottom: 1px solid var(--regla); padding-bottom: 8px; }
 .seccion-cab .n { font-family: var(--font-mono); font-size: .75rem; color: var(--tinta-suave); }
 .seccion-cab h2 { font-size: 1.05rem; font-weight: 600; }
+
+/* Los insumos del riel: que reconocio el motor, no que archivos se
+   subieron. Diez pastillas con el nombre del export de SAP recortado y una
+   barra de scroll no dicen nada; cinco renglones con su marca dicen por que
+   el semaforo esta en rojo. */
+.insumo { display: flex; align-items: baseline; gap: 8px; padding: 3px 0;
+          font-size: 12.5px; line-height: 1.35; }
+.insumo .m { flex-shrink: 0; width: 12px; font-weight: 700; text-align: center; }
+.insumo.si .m { color: var(--verde); }
+.insumo.no .m { color: var(--ambar); }
+.insumo.no span:last-child { color: var(--tinta-suave); }
 
 .files { margin-top: 12px; font-size: 13px; }
 .files span { display: inline-block; background: var(--cian-tenue); border: 1px solid var(--regla);
@@ -366,8 +386,8 @@ a.dl { display: inline-block; margin-top: 10px; text-decoration: none; }
         <div id="semaforo"></div>
 
         <div id="bloque-insumos">
-          <div class="rotulo" style="margin:18px 0 8px">Insumos <span id="n-insumos"></span></div>
-          <div class="files" id="r-archivos" style="margin-top:0"></div>
+          <div class="rotulo" style="margin:20px 0 8px">Insumos</div>
+          <div id="r-insumos"></div>
         </div>
 
         <div style="margin-top:20px;display:flex;flex-direction:column;gap:8px">
@@ -483,6 +503,19 @@ const PASTILLA = { OK: "e-OK", FALLA: "e-FALLA", "NO EJECUTADO": "e-NOEJ",
                    ATESTADO: "e-ATEST", "NO APLICA": "e-NA" };
 const TONO_SEMAFORO = { ROJO: "error", AMARILLO: "alerta", VERDE: "ok" };
 
+/* Los insumos, en el orden en que el motor los usa y con el nombre que el
+   auditor les da. Los dos primeros son obligatorios; los demas habilitan
+   controles, y su ausencia es la razon de que alguno quede NO EJECUTADO. */
+const INSUMOS = [
+  ["borrador",          "Borrador de la declaracion"],
+  ["auxiliar",          "Auxiliar 2368"],
+  ["balance",           "Balance de prueba"],
+  ["erp",               "Reporte de retenciones del ERP"],
+  ["facturas",          "Facturas fuente"],
+  ["pago_anterior",     "Declaracion y pago del mes anterior"],
+  ["formato_historico", "Formato historico del cliente"],
+];
+
 /* El gesto del lapiz sobre el control que paso, tomado del sistema de
    Russell Bedford: dice "verificado" mas rapido que cualquier palabra. */
 function svgPunteo(){
@@ -542,13 +575,19 @@ function pintar(data){
   $("#r-periodo").textContent   = $("#periodo").value || "\u2014";
   $("#r-municipio").textContent = $("#municipio").selectedOptions[0].textContent;
   // Un rotulo "Insumos" sobre una lista vacia promete algo que no esta.
-  // La lista ocupaba 328px de los 829 del riel --el 40%-- por algo que se
-  // mira una vez. Se acota a cinco filas con scroll y el conteo pasa al
-  // rotulo, que es el dato que de verdad se consulta de un vistazo.
-  $("#bloque-insumos").classList.toggle("hidden", archivos.length === 0);
-  $("#n-insumos").textContent = archivos.length ? `· ${archivos.length}` : "";
-  $("#r-archivos").innerHTML    = archivos.map(f =>
-    `<span>${f.name.endsWith(".pdf")?"\u{1F4C4}":"\u{1F4CA}"} ${f.name}</span>`).join("");
+  /* Antes: diez pastillas con el nombre del archivo, recortadas, con barra
+     de scroll. El nombre del export de SAP no le dice nada a nadie y ocupaba
+     el 40% del riel. Ahora se listan los INSUMOS DEL MOTOR con su marca: los
+     que faltan son la razon de que un control quede sin ejecutar, y eso
+     conecta la lista con el semaforo de arriba, que antes habia que atar de
+     memoria. */
+  const tiene = new Set(R.insumos_obtenidos || []);
+  $("#r-insumos").innerHTML = INSUMOS.map(([rol, nombre]) => {
+    const hay = tiene.has(rol);
+    return `<div class="insumo ${hay ? "si" : "no"}">
+      <span class="m">${hay ? "\u2713" : "\u2715"}</span><span>${nombre}</span>
+    </div>`;
+  }).join("");
 
   const s = R.semaforo, tono = TONO_SEMAFORO[s.color] || "info";
   $("#semaforo").innerHTML = `<div class="aviso ${tono}" style="display:block">

@@ -5,6 +5,12 @@ __pycache__/
 # binario empaquetado (120MB, se genera con PyInstaller: ver lanzador.py) y
 # salidas de prueba sueltas -- nunca pertenecen al repositorio
 *.exe
+# Andamiaje de PyInstaller. construir_exe.py lo borra al terminar, pero una
+# limpieza que falla no puede acabar en un commit: build/ pesa 168MB y trae
+# un .pkg de 125MB que GitHub rechaza. El .gitignore es la red, no la
+# limpieza.
+build/
+*.spec
 papel_reteica_*
 !papel_reteica_*.xlsx
 web/_muestra.json
