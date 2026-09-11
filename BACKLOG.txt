@@ -2,16 +2,18 @@
 MOTOR RETEICA - LISTA DE CAMBIOS
 ================================================================================
 Abierto:      2026-09-09
-Actualizado:  2026-09-10
+Actualizado:  2026-09-11
 
 ESTADO REAL (leer esto antes que nada)
   Etapas 1..5      IMPLEMENTADAS y commiteadas.
-  Etapa 6          ABIERTA. Cambia la salida final: deja de ser el libro que
-                   genera papel_excel.py y pasa a ser la plantilla real de la
-                   firma. TIENE UNA DECISION PENDIENTE DE FELIPE (celda
-                   testigo de D11, ver ETAPA 6).
-  Pruebas          294 verdes (151 de linea base historica + 143 nuevas).
-  Repositorio      22 commits. Respaldado en GitHub, repo PRIVADO
+  Etapa 6          CERRADA. La salida final es la plantilla real de la firma.
+                   D11 se resolvio en su version definitiva el 2026-09-11:
+                   lo que cruza de una hoja a otra lo deposita el MOTOR como
+                   valor, no como formula (ver SESION 2026-09-11).
+  Interfaz         Rediseno del frontend del .exe: dos pestanas (Resumen y
+                   Controles) en vez de seis secciones apiladas.
+  Pruebas          391 verdes.
+  Repositorio      41 commits. Respaldado en GitHub, repo PRIVADO
                    Frios89/Agente_ReteICA, compartido con mantilla16.
                    El repo de trabajo (excelrix) NO tiene remoto a proposito:
                    contiene expedientes de OTROS clientes. Para respaldar:
@@ -19,23 +21,28 @@ ESTADO REAL (leer esto antes que nada)
                        https://github.com/Frios89/Agente_ReteICA.git main
                    (nunca 'git push' a secas desde excelrix)
 
-Linea base de no-regresion: 379 pruebas verdes y las anclas de Terlica julio
+Linea base de no-regresion: 391 pruebas verdes y las anclas de Terlica julio
              2026 (spec seccion 10.1) exactas. Cualquier cambio que las rompa
              se revierte.
 
-BLOQUEOS PARA DECLARAR PRODUCCION (2026-09-10)
+BLOQUEOS PARA DECLARAR PRODUCCION (2026-09-11)
   1. CERO PRUEBA CIEGA. Las fixtures son byte-identicas a julio. El motor
      nunca ha corrido un mes que no haya visto. Es el riesgo numero uno y
-     hace falta agosto 2026 para cerrarlo.
+     hace falta agosto 2026 para cerrarlo. SIGUE ABIERTO y ahora es el
+     unico bloqueo tecnico que queda.
   2. La corrida real da EXIT 3 / semaforo ROJO: C7 sin atestacion y C12 sin
      pago. Es correcto -- refleja la realidad de los insumos -- pero
      significa que hoy el producto siempre concluye "no concluyente".
+     Desde el 2026-09-11 el riel de la interfaz muestra QUE insumo falta,
+     asi que la causa del rojo se lee sin cruzarla de memoria.
      (C2 ya NO esta bloqueado: el balance se extrajo el 2026-09-10.)
-  3. Etapa 6 abierta: no tiene sentido congelar produccion sobre una salida
-     que se va a retirar.
-  4. El .exe distribuible esta viejo (09-sep) frente al ultimo commit
-     (10-sep). Recompilar AL CERRAR la etapa 6, no antes: recompilar ahora
-     produce un binario que queda obsoleto en dias.
+  3. RESUELTO. Etapa 6 cerrada el 2026-09-11.
+  4. RESUELTO. El .exe se recompila con construir_exe.py, que fija la
+     receta -- incluidos los DOS datos que hay que empaquetar, web/index.html
+     y la plantilla .xlsx -- y se verifica sirviendo una corrida real por la
+     interfaz, no dandolo por bueno tras compilar. Ojo: cada cambio de
+     web/index.html o de la plantilla OBLIGA a recompilar; el .exe los lleva
+     dentro.
 
 Corpus de prueba: C:\Users\Felipe Rios\Downloads\OneDrive_1_9-9-2026
   OJO: auxiliar, borrador, ERP y las 3 facturas son BYTE-IDENTICOS a
@@ -1427,6 +1434,77 @@ DECISION PENDIENTE DE FELIPE
 Sin resolver esto, cargar las tarifas de 2016 seria ASUMIR que la
 modificacion de dic-2025 no cambio nada. Eso es justo lo que este motor no
 hace.
+
+================================================================================
+SESION 2026-09-11 -- SIETE DEFECTOS, TODOS ENCONTRADOS ABRIENDO EL PRODUCTO
+================================================================================
+Ninguno lo encontro la suite. Felipe los marco sobre capturas de pantalla y
+del Excel. El patron se repite y conviene nombrarlo: LO QUE NO SE MIRA CON
+LOS OJOS DEL QUE LO USA, NO ESTA PROBADO.
+
+S1  La interfaz web entregaba el papel VIEJO. La etapa 6 cambio el
+    entregable y solo se cambio la CLI; la API siguio llamando a
+    generar_papel(). La API no tenia una sola prueba de extremo a extremo,
+    y el fallo devolvia 200 con un .xlsx valido -- el equivocado.
+    -> tests/test_api_entrega_la_plantilla.py mira las HOJAS del archivo
+       que descarga el usuario, no que la llamada no reviente.
+
+S2  La interfaz era una feed de seis secciones apiladas con la CONCLUSION
+    al final, despues de dieciseis controles y la tabla de excepciones. El
+    formulario de carga no se iba nunca. Ancho fijo en 980px sobre
+    pantallas de 1920.
+    -> riel de contexto + pestanas. Luego se fusionaron en dos: Resumen
+       (conclusion, cifras, tira de controles, excepciones) y Controles.
+
+S3  Tres defectos medidos sobre la pantalla: pastillas de nombres de
+    archivo que se salian 132px del riel y se montaban sobre el panel de
+    controles; la marca del control centrada en una fila de 103px, junto al
+    DETALLE, como si lo calificara a el; margenes de <p> por defecto que
+    gastaban 97px por control.
+
+S4  EL PAPEL SE ESCRIBIA BIEN Y SE ABRIA VACIO. Tres causas:
+      - BALANCE: la plantilla trae 338 de sus 345 filas OCULTAS y el motor
+        escribia justo ahi.
+      - BORRADOR TERLICA: el borrado arrancaba en la columna D y se llevaba
+        formulas DEL FORMULARIO (BASE, IMPTO y dos sumas cruzadas).
+      - TODO EL LIBRO: openpyxl escribe formulas sin valor en cache y
+        fidelidad.py descarta calcChain.xml. Excel abria y no recalculaba.
+    -> tests/test_el_papel_se_ve.py: visibilidad y marca de recalculo.
+       Contra el .xlsx anterior, cinco de sus seis pruebas fallan.
+
+S5  D11, VERSION DEFINITIVA. Las referencias entre hojas dejan de ser
+    formulas. El VLOOKUP costo dos defectos seguidos ajenos a ReteICA (no
+    recalculaba; luego #N/D por texto contra numero) y, sobre todo, NINGUNA
+    prueba podia atraparlos: openpyxl no evalua formulas, asi que lo unico
+    verificable era la CADENA. Ahora el motor deposita el NUMERO en las
+    cuatro celdas que cruzan de hoja. La aritmetica de la firma sigue
+    siendo formula: el motor pone las ENTRADAS, la derivacion es del papel.
+    Lo que se pierde: editar el balance a mano ya no arrastra el resto. Es
+    correcto -- deberia obligar a volver a correr.
+
+S6  El BALANCE no mostraba la cuenta que EXCLUYO. C13 avisa que 2368010090
+    se trato como contrapartida de pago y esa cuenta no aparecia en ninguna
+    hoja: el papel afirmaba una exclusion que el lector no podia verificar.
+    Ahora va al final del extracto, marcada, con su saldo acumulado
+    (+38.587.923, la unica 2368 positiva), que es la cifra que la delata.
+
+S7  El riel listaba NOMBRES DE ARCHIVO. Pasa a listar los insumos que el
+    motor reconocio, con su marca. No es cosmetica: los que faltan son la
+    razon de que un control quede sin ejecutar, y eso conecta la lista con
+    el semaforo, que antes habia que atar de memoria.
+
+DEFECTOS PROPIOS ENCONTRADOS EN EL CAMINO (van aqui para no repetirlos)
+  - Una prueba recorria hasta la fila 350 y en openpyxl LEER hoja.cell()
+    CREA la celda: engordaba la hoja y hacia fallar a la prueba siguiente.
+    Sola pasaba, en grupo no.
+  - `main { padding: ... }` no se aplicaba NUNCA: el elemento lleva la
+    clase .contenedor, cuyo atajo `padding: 0 24px` pone el superior en
+    cero, y una clase le gana a un selector de tipo.
+  - Un commit se llevo build/ de PyInstaller (168MB, .pkg de 125MB) y
+    GitHub rechazo el push. La limpieza de construir_exe.py puede fallar
+    en silencio; la red es el .gitignore, no la limpieza.
+  - Se rediseno el proyecto EQUIVOCADO durante una sesion entera por leer
+    mal el encargo: analitica-puc era el EJEMPLO, ReteICA el paciente.
 
 ================================================================================
 TRIAGE DE LAS OBJECIONES DE IA-3 (corrida real con llave, 2026-09-10)
