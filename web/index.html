@@ -468,10 +468,14 @@ a.dl { display: inline-block; margin-top: 10px; text-decoration: none; }
 
 <script>
 const $ = s => document.querySelector(s);
+const BASE = (() => {
+  const p = window.location.pathname;
+  return p.endsWith("/") ? p.slice(0, -1) : p.substring(0, p.lastIndexOf("/"));
+})();
 
 $("#cerrar").onclick = async () => {
   if(!confirm("¿Cerrar la aplicacion? Se detendra el servidor local.")) return;
-  try { await fetch("/salir"); } catch(e){}
+  try { await fetch(BASE + "/salir"); } catch(e){}
   document.body.innerHTML = "<div style='font-family:Montserrat,sans-serif;text-align:center;margin-top:80px;color:#1b1a5e'><h2>Aplicacion cerrada</h2><p>Ya puede cerrar esta pestaña.</p></div>";
 };
 
@@ -553,7 +557,7 @@ $("#run").onclick = async () => {
   fd.append("api_key", $("#apikey").value);
   $("#run").disabled = true; $("#run").textContent = "Procesando…";
   try {
-    const r = await fetch("/analizar", { method:"POST", body:fd });
+    const r = await fetch(BASE + "/analizar", { method:"POST", body:fd });
     const data = await r.json();
     if(!r.ok){ msg.innerHTML = `<div class="aviso error" style="margin-top:12px"><div class="cuerpo">${data.detail||"Error"}</div></div>`; return; }
     pintar(data);
@@ -565,7 +569,7 @@ function pintar(data){
   const R = data.resumen;
   $("#preparar").classList.add("hidden");
   $("#res").classList.remove("hidden");
-  $("#dl").href = data.descarga;
+  $("#dl").href = BASE + data.descarga;
   $("#msg").innerHTML = "";
   window.scrollTo(0, 0);
 
