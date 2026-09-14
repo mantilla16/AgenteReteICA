@@ -22,7 +22,7 @@ import os
 import smtplib
 from email.message import EmailMessage
 
-import auth
+from . import auth
 
 log = logging.getLogger("reteica.correo")
 
