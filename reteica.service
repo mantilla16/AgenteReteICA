@@ -1,0 +1,17 @@
+[Unit]
+Description=Motor de Revision de ReteICA
+After=network.target
+
+[Service]
+User=reteica
+Group=reteica
+WorkingDirectory=/opt/reteica
+ExecStart=/opt/reteica/venv/bin/gunicorn motor_reteica.api.servidor:app -c gunicorn.conf.py
+Restart=always
+RestartSec=5
+Environment="PYTHONUNBUFFERED=1"
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
