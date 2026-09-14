@@ -56,6 +56,7 @@ _PAPELES: dict[str, Path] = {}
 COOKIE = "sesion_reteica"
 SESION_HORAS = int(os.getenv("SESION_HORAS", "12"))
 SESION_SEGURA = os.getenv("SESION_SEGURA", "0") in ("1", "true", "True", "si")
+BASE_PATH = os.getenv("RETEICA_BASE_PATH", "/reteica").rstrip("/")
 
 PUBLICAS = {"/auth/estado", "/auth/codigo", "/auth/verificar", "/login",
             "/auth/login.html"}
@@ -84,12 +85,8 @@ async def exigir_sesion(request: Request, call_next):
     ruta = request.url.path
 
     # Detectar base path (ej: /reteica)
-    base = ""
-    partes = ruta.split("/")
-    if len(partes) > 2 and partes[1]:
-        base = "/" + partes[1]
-
-    ruta_relativa = ruta[len(base):] if base else ruta
+    base = BASE_PATH
+    ruta_relativa = ruta[len(base):] if ruta.startswith(base) else ruta
 
     if request.method == "OPTIONS" or ruta_relativa in PUBLICAS:
         return await call_next(request)
