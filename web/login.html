@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ingresar · Motor ReteICA</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap');
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Montserrat',sans-serif;background:#0f172a;color:#fff;min-height:100vh;display:flex;align-items:center;justify-content:center}
+.card{background:#1e293b;border-radius:16px;padding:40px;width:100%;max-width:420px;box-shadow:0 25px 50px -12px rgba(0,0,0,.4)}
+.lead{font-size:11px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:#64748b;margin-bottom:24px}
+h1{font-size:22px;font-weight:700;margin-bottom:6px}
+.sub{font-size:13px;color:#94a3b8;margin-bottom:28px;line-height:1.5}
+label{display:block;font-size:12px;font-weight:600;color:#94a3b8;margin-bottom:6px}
+input{width:100%;padding:12px 14px;border-radius:8px;border:1px solid #334155;background:#0f172a;color:#fff;font-family:inherit;font-size:15px;transition:.15s}
+input:focus{outline:none;border-color:#38bdf8;box-shadow:0 0 0 3px rgba(56,189,248,.2)}
+input::placeholder{color:#475569}
+.btn{width:100%;padding:12px;border:0;border-radius:8px;font-family:inherit;font-size:15px;font-weight:600;cursor:pointer;transition:.15s;margin-top:20px}
+.btn-primary{background:#38bdf8;color:#0f172a}
+.btn-primary:hover:not(:disabled){background:#7dd3fc}
+.btn:disabled{opacity:.4;cursor:default}
+.btn-secondary{background:transparent;border:1px solid #334155;color:#94a3b8;margin-top:10px}
+.btn-secondary:hover{border-color:#64748b;color:#fff}
+.msg{padding:12px 14px;border-radius:8px;font-size:13px;margin-top:16px;display:none}
+.msg.error{display:block;background:#450a0a;border:1px solid #7f1d1d;color:#fca5a5}
+.msg.ok{display:block;background:#052e16;border:1px solid #14532d;color:#86efac}
+.codigo{font-size:32px;font-family:monospace;letter-spacing:.3em;text-align:center;margin:16px 0}
+.volver{font-size:12px;color:#64748b;cursor:pointer;text-decoration:underline;margin-top:12px;display:inline-block}
+.volver:hover{color:#94a3b8}
+.logo{display:flex;align-items:center;gap:10px;margin-bottom:28px}
+.logo svg{width:32px;height:32px}
+.logo span{font-size:14px;font-weight:700;color:#e2e8f0}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">
+    <svg viewBox="0 0 240 240" fill="none"><g transform="rotate(-90 120 120)"><circle cx="120" cy="120" r="100" stroke="#38bdf8" stroke-width="18" stroke-linecap="round" stroke-dasharray="149 628" stroke-dashoffset="0"/><circle cx="120" cy="120" r="100" stroke="#f59e0b" stroke-width="18" stroke-linecap="round" stroke-dasharray="149 628" stroke-dashoffset="-157"/><circle cx="120" cy="120" r="100" stroke="#38bdf8" stroke-width="18" stroke-linecap="round" stroke-dasharray="149 628" stroke-dashoffset="-314"/><circle cx="120" cy="120" r="100" stroke="#a855f7" stroke-width="18" stroke-linecap="round" stroke-dasharray="149 628" stroke-dashoffset="-471"/></g></svg>
+    <span>Russell Bedford</span>
+  </div>
+
+  <!-- Paso 1: Correo -->
+  <div id="paso-correo">
+    <p class="lead">Motor de Revision · ReteICA</p>
+    <h1>Ingrese con su correo</h1>
+    <p class="sub">Le enviamos un codigo de 6 digitos a su buzon. Solo funcionan los correos @rbcol.co.</p>
+    <label>CORREO</label>
+    <input id="correo" type="email" placeholder="nombre@rbcol.co" autocomplete="email">
+    <div id="msg1" class="msg"></div>
+    <button class="btn btn-primary" id="btn-codigo">Enviarme el codigo</button>
+  </div>
+
+  <!-- Paso 2: Codigo -->
+  <div id="paso-codigo" style="display:none">
+    <p class="lead">Motor de Revision · ReteICA</p>
+    <h1>Verifique su correo</h1>
+    <p class="sub">Escriba el codigo de 6 digitos que llego a su buzon.</p>
+    <label>CODIGO</label>
+    <input id="codigo" inputmode="numeric" maxlength="6" placeholder="000000" style="text-align:center;font-size:24px;letter-spacing:.3em">
+    <div id="msg2" class="msg"></div>
+    <button class="btn btn-primary" id="btn-entrar">Entrar</button>
+    <span class="volver" id="volver">Volver al paso anterior</span>
+  </div>
+</div>
+
+<script>
+const BASE = (() => {
+  const p = window.location.pathname;
+  return p.endsWith("/") ? p.slice(0, -1) : p.substring(0, p.lastIndexOf("/"));
+})();
+
+let correoActual = "";
+
+document.getElementById("btn-codigo").onclick = async () => {
+  const correo = document.getElementById("correo").value.trim();
+  const msg = document.getElementById("msg1");
+  msg.className = "msg"; msg.textContent = "";
+  if (!correo) { msg.className = "msg error"; msg.textContent = "Escriba su correo."; return; }
+
+  document.getElementById("btn-codigo").disabled = true;
+  document.getElementById("btn-codigo").textContent = "Enviando...";
+
+  try {
+    const r = await fetch(BASE + "/auth/codigo", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({correo})
+    });
+    const data = await r.json();
+    if (!r.ok) { msg.className = "msg error"; msg.textContent = data.detail || "Error"; return; }
+    correoActual = correo;
+    document.getElementById("paso-correo").style.display = "none";
+    document.getElementById("paso-codigo").style.display = "block";
+    document.getElementById("codigo").focus();
+  } catch(e) {
+    msg.className = "msg error"; msg.textContent = e;
+  } finally {
+    document.getElementById("btn-codigo").disabled = false;
+    document.getElementById("btn-codigo").textContent = "Enviarme el codigo";
+  }
+};
+
+document.getElementById("btn-entrar").onclick = async () => {
+  const codigo = document.getElementById("codigo").value.trim();
+  const msg = document.getElementById("msg2");
+  msg.className = "msg"; msg.textContent = "";
+  if (!codigo || codigo.length !== 6) { msg.className = "msg error"; msg.textContent = "El codigo tiene 6 digitos."; return; }
+
+  document.getElementById("btn-entrar").disabled = true;
+  document.getElementById("btn-entrar").textContent = "Verificando...";
+
+  try {
+    const r = await fetch(BASE + "/auth/verificar", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({correo: correoActual, codigo})
+    });
+    const data = await r.json();
+    if (!r.ok) { msg.className = "msg error"; msg.textContent = data.detail || "Codigo incorrecto"; return; }
+    window.location.href = BASE + "/";
+  } catch(e) {
+    msg.className = "msg error"; msg.textContent = e;
+  } finally {
+    document.getElementById("btn-entrar").disabled = false;
+    document.getElementById("btn-entrar").textContent = "Entrar";
+  }
+};
+
+document.getElementById("volver").onclick = () => {
+  document.getElementById("paso-codigo").style.display = "none";
+  document.getElementById("paso-correo").style.display = "block";
+  document.getElementById("msg2").className = "msg";
+};
+
+document.getElementById("codigo").addEventListener("keydown", e => {
+  if (e.key === "Enter") document.getElementById("btn-entrar").click();
+});
+
+document.getElementById("correo").addEventListener("keydown", e => {
+  if (e.key === "Enter") document.getElementById("btn-codigo").click();
+});
+</script>
+</body>
+</html>

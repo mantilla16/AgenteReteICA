@@ -320,7 +320,7 @@ a.dl { display: inline-block; margin-top: 10px; text-decoration: none; }
       <span class="rotulo">Motor de Revision &middot; ReteICA</span>
     </div>
     <div style="margin-left:auto">
-      <button id="cerrar" class="btn btn-contorno" title="Cierra la aplicacion">Cerrar</button>
+      <button id="cerrar" class="btn btn-contorno" title="Cerrar sesion">Salir</button>
     </div>
   </div>
 </header>
@@ -474,9 +474,9 @@ const BASE = (() => {
 })();
 
 $("#cerrar").onclick = async () => {
-  if(!confirm("¿Cerrar la aplicacion? Se detendra el servidor local.")) return;
+  if(!confirm("¿Cerrar sesion?")) return;
   try { await fetch(BASE + "/salir"); } catch(e){}
-  document.body.innerHTML = "<div style='font-family:Montserrat,sans-serif;text-align:center;margin-top:80px;color:#1b1a5e'><h2>Aplicacion cerrada</h2><p>Ya puede cerrar esta pestaña.</p></div>";
+  window.location.href = BASE + "/login";
 };
 
 /* Las pestanas no cargan nada: solo muestran una de las cuatro hojas que

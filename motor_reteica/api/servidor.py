@@ -1,35 +1,34 @@
-"""API del motor de revision de ReteICA.
-
-El auditor sube los archivos del cliente y recibe el papel de trabajo. Esta
-capa NO reimplementa el motor: llama a las MISMAS funciones que la CLI
-(motor_reteica.pipeline.revisar, motor_reteica.plantilla.deposito.depositar) y
-traduce el resultado a JSON. Nunca muestra una traza de Python al frontend.
-
-El unico trabajo propio de este modulo es RESOLVER EL MANIFIESTO por el
-auditor: detecta que rol tiene cada archivo subido -- por ESTRUCTURA, nunca
-por nombre de archivo ni por adivinanza -- y escribe manifiesto.json. Es el
-"asistente interactivo" que el backlog del proyecto (1.1, D2) preveia desde
-el principio: "puede venir DESPUES, encima, cuya unica funcion sea escribir
-el manifiesto". La disciplina de fondo no cambia: un archivo cuyo rol no se
-puede determinar por su estructura queda SIN CLASIFICAR y se lo dice al
-auditor, nunca se le asigna un rol a adivinar.
-
-Levantar en desarrollo:  uvicorn motor_reteica.api.servidor:app --reload
 """
+API del motor de revision de ReteICA con autenticacion.
+
+Login por correo @rbcol.co + codigo de 6 digitos.
+Basado en el sistema de analitica-puc.
+
+Levantar en desarrollo: uvicorn motor_reteica.api.servidor:app --reload
+"""
+from __future__ import annotations
 
 import json
+import os
 import shutil
 import tempfile
-import threading
 import uuid
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 
 import openpyxl
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from pydantic import BaseModel
 
+from .. import __version__
+from ..auth import (hash_token, nuevo_token, normalizar_correo, nuevo_codigo,
+                    hash_codigo, verificar_codigo, problema_con_correo, LARGO_CODIGO,
+                    MINUTOS_VIGENCIA_CODIGO, MAX_INTENTOS_CODIGO, MAX_CODIGOS_POR_VENTANA,
+                    MINUTOS_VENTANA_ENVIO)
+from .. import correo as CO
+from .. import db
 from ..atestacion import AtestacionInvalida
 from ..identidad import IdentidadIncompatible
 from ..ia.cliente import ClienteIA
@@ -44,7 +43,6 @@ from ..pipeline import revisar
 from ..recursos import ruta_recurso
 from ..semaforo import evaluar
 from ..tipos import etiqueta_estado
-from .. import __version__
 
 app = FastAPI(title="Motor de Revision de ReteICA", version=__version__)
 
@@ -55,9 +53,179 @@ _RAIZ.mkdir(exist_ok=True)
 _WEB = ruta_recurso("web")
 _PAPELES: dict[str, Path] = {}
 
+COOKIE = "sesion_reteica"
+SESION_HORAS = int(os.getenv("SESION_HORAS", "12"))
+SESION_SEGURA = os.getenv("SESION_SEGURA", "0") in ("1", "true", "True", "si")
+
+PUBLICAS = {"/auth/estado", "/auth/codigo", "/auth/verificar", "/login",
+            "/auth/login.html"}
+
 
 # --------------------------------------------------------------------------
-# Deteccion de roles por ESTRUCTURA (nunca por nombre de archivo)
+# Lifecycle
+# --------------------------------------------------------------------------
+
+@app.on_event("startup")
+def _abrir() -> None:
+    db.abrir()
+
+
+@app.on_event("shutdown")
+def _cerrar() -> None:
+    db.cerrar()
+
+
+# --------------------------------------------------------------------------
+# Middleware de sesion
+# --------------------------------------------------------------------------
+
+@app.middleware("http")
+async def exigir_sesion(request: Request, call_next):
+    ruta = request.url.path
+    if request.method == "OPTIONS" or ruta in PUBLICAS:
+        return await call_next(request)
+
+    # Permitir archivos estaticos
+    if ruta.startswith("/login") or ruta.endswith((".css", ".js", ".ico", ".png")):
+        return await call_next(request)
+
+    token = request.cookies.get(COOKIE)
+    u = db.usuario_de_sesion(hash_token(token)) if token else None
+    if not u:
+        if ruta.startswith("/auth/"):
+            return await call_next(request)
+        return RedirectResponse(url="/login", status_code=302)
+
+    request.state.usuario = u
+    return await call_next(request)
+
+
+# --------------------------------------------------------------------------
+# Auth routes
+# --------------------------------------------------------------------------
+
+class PedirCodigo(BaseModel):
+    correo: str
+
+
+class VerificarCodigo(BaseModel):
+    correo: str
+    codigo: str
+
+
+@app.get("/auth/estado")
+def auth_estado() -> dict:
+    sirve, falta = CO.configurado()
+    return {"dominio": "rbcol.co", "correo_listo": sirve,
+            "correo_problema": falta, "modo_correo": CO.modo(),
+            "largo_codigo": LARGO_CODIGO,
+            "minutos_codigo": MINUTOS_VIGENCIA_CODIGO}
+
+
+@app.post("/auth/codigo")
+def pedir_codigo(c: PedirCodigo, request: Request) -> dict:
+    correo = normalizar_correo(c.correo)
+    problema = problema_con_correo(correo)
+    if problema:
+        raise HTTPException(422, problema)
+
+    desde = datetime.now(timezone.utc) - timedelta(minutes=MINUTOS_VENTANA_ENVIO)
+    if db.codigos_recientes(correo, desde) >= MAX_CODIGOS_POR_VENTANA:
+        raise HTTPException(
+            429, f"Ya se enviaron varios codigos a ese correo. Espere "
+                 f"{MINUTOS_VENTANA_ENVIO} minutos o use el ultimo que recibio.")
+
+    codigo = nuevo_codigo()
+    expira = datetime.now(timezone.utc) + timedelta(minutes=MINUTOS_VIGENCIA_CODIGO)
+    db.crear_codigo(correo, hash_codigo(codigo), expira,
+                    _ip(request), request.headers.get("user-agent"))
+    try:
+        via = CO.enviar_codigo(correo, codigo, MINUTOS_VIGENCIA_CODIGO)
+    except CO.CorreoNoConfigurado as e:
+        raise HTTPException(503, f"No se puede enviar el correo. {e}")
+    except Exception as e:
+        raise HTTPException(502, f"El correo no salio: {e}")
+
+    return {"enviado": True, "minutos": MINUTOS_VIGENCIA_CODIGO}
+
+
+@app.post("/auth/verificar")
+def verificar_codigo_route(c: VerificarCodigo, request: Request,
+                           response: Response) -> dict:
+    correo = normalizar_correo(c.correo)
+    problema = problema_con_correo(correo)
+    if problema:
+        raise HTTPException(422, problema)
+
+    fila = db.codigo_vigente(correo)
+    if not fila:
+        raise HTTPException(401, "El codigo no es correcto o ya vencio")
+    if fila["expira_en"] <= datetime.now(timezone.utc):
+        raise HTTPException(401, "El codigo expiro")
+    if fila["intentos"] >= MAX_INTENTOS_CODIGO:
+        db.consumir_codigo(fila["id"])
+        raise HTTPException(429, "Demasiados intentos. Pida un codigo nuevo")
+    if not verificar_codigo((c.codigo or "").strip(), fila["codigo_hash"]):
+        db.sumar_intento(fila["id"])
+        raise HTTPException(401, "El codigo no es correcto")
+
+    db.consumir_codigo(fila["id"])
+
+    u = db.usuario_por_correo(correo)
+    if u and not u["activo"]:
+        raise HTTPException(403, "Cuenta desactivada")
+    if not u:
+        u = db.crear_usuario_por_correo(correo, correo.split("@")[0])
+
+    _sesion_nueva(u, request, response)
+    return {"usuario": u["usuario"], "nombre": u["nombre"],
+            "correo": u["correo"], "rol": u["rol"]}
+
+
+@app.post("/auth/logout")
+def logout(request: Request, response: Response) -> dict:
+    token = request.cookies.get(COOKIE)
+    if token:
+        db.borrar_sesion(hash_token(token))
+    response.delete_cookie(COOKIE, path="/")
+    return {"ok": True}
+
+
+def _sesion_nueva(u: dict, request: Request, response: Response) -> None:
+    token = nuevo_token()
+    expira = datetime.now(timezone.utc) + timedelta(hours=SESION_HORAS)
+    db.crear_sesion(hash_token(token), u["id"], expira,
+                    request.headers.get("user-agent"))
+    response.set_cookie(
+        COOKIE, token, httponly=True, samesite="lax",
+        secure=SESION_SEGURA, max_age=SESION_HORAS * 3600, path="/",
+    )
+
+
+def _ip(request: Request) -> str | None:
+    return (request.headers.get("x-real-ip")
+            or (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+            or (request.client.host if request.client else None))
+
+
+# --------------------------------------------------------------------------
+# Paginas
+# --------------------------------------------------------------------------
+
+@app.get("/login", response_class=HTMLResponse)
+def login_page() -> str:
+    idx = _WEB / "login.html"
+    return idx.read_text(encoding="utf-8") if idx.exists() else "<h1>Login</h1>"
+
+
+@app.get("/", response_class=HTMLResponse)
+def inicio() -> str:
+    idx = _WEB / "index.html"
+    return idx.read_text(encoding="utf-8") if idx.exists() else "<h1>Motor de Revision de ReteICA</h1>"
+
+
+# --------------------------------------------------------------------------
+# Deteccion de roles por ESTRUCTURA
 # --------------------------------------------------------------------------
 
 def _es_borrador_pdf(ruta: Path) -> bool:
@@ -72,19 +240,6 @@ _MARCAS_DE_FACTURA = ("FACTURA", "FACTURA ELECTRONICA", "FACTURA DE VENTA")
 
 
 def _es_factura_pdf(ruta: Path) -> bool:
-    """Un PDF es factura si se identifica COMO factura.
-
-    V5: antes se tomaba como factura TODO PDF que no fuera el borrador, y el
-    extracto de saldos de SAP (S_ALR_...) entraba a la muestra documental.
-    C11 lo reportaba como HALLAZGO -- "la factura no aparece en el auxiliar"
-    -- y el papel le imputaba al cliente una factura sin contabilizar que no
-    existe.
-
-    Si el PDF no trae capa de texto no se puede determinar, y entonces NO se
-    adivina: queda sin clasificar y el auditor decide. Es la misma regla que
-    1.5 aplica a las fuentes contables -- se verifica que el documento sea
-    del tipo que se dice.
-    """
     try:
         import pdfplumber
         with pdfplumber.open(ruta) as pdf:
@@ -97,9 +252,6 @@ def _es_factura_pdf(ruta: Path) -> bool:
 
 
 def _rol_xlsx(ruta: Path):
-    """auxiliar/balance/erp por firma de columnas; formato_historico por
-    tener 2+ hojas cuyo nombre normaliza a un periodo AAAA-MM. None si no
-    se reconoce ninguna de las dos formas."""
     try:
         filas = leer_filas(ruta)
     except Exception:
@@ -117,7 +269,6 @@ def _rol_xlsx(ruta: Path):
 
 
 def _clasificar(rutas: list[Path]):
-    """Devuelve (archivos_por_rol, facturas, sin_clasificar, conflictos)."""
     archivos = {"borrador": None, "auxiliar": None, "balance": None,
                "erp": None, "formato_historico": None}
     facturas, sin_clasificar, conflictos = [], [], []
@@ -128,15 +279,13 @@ def _clasificar(rutas: list[Path]):
             if _es_borrador_pdf(ruta):
                 if archivos["borrador"]:
                     conflictos.append(
-                        "dos archivos parecen ser el borrador de la "
-                        "declaracion: %r y %r" % (archivos["borrador"], ruta.name))
+                        "dos archivos parecen ser el borrador: %r y %r"
+                        % (archivos["borrador"], ruta.name))
                 else:
                     archivos["borrador"] = ruta.name
             elif _es_factura_pdf(ruta):
                 facturas.append(ruta.name)
             else:
-                # No es el borrador y tampoco se identifica como factura:
-                # no se adivina. V5.
                 sin_clasificar.append(ruta.name)
         elif extension in (".xlsx", ".xls"):
             rol = _rol_xlsx(ruta)
@@ -193,14 +342,8 @@ def _resumen(ctx) -> dict:
 
 
 # --------------------------------------------------------------------------
-# Rutas
+# API routes
 # --------------------------------------------------------------------------
-
-@app.get("/", response_class=HTMLResponse)
-def inicio() -> str:
-    idx = _WEB / "index.html"
-    return idx.read_text(encoding="utf-8") if idx.exists() else "<h1>Motor de Revision de ReteICA</h1>"
-
 
 @app.post("/analizar")
 async def analizar(
@@ -246,10 +389,6 @@ async def analizar(
             AtestacionInvalida, FileNotFoundError) as error:
         raise HTTPException(400, str(error))
 
-    # Etapa 6: el entregable es el papel de trabajo REAL de la firma, no el
-    # libro que se inventaba el motor. El CLI ya lo hacia (--formato
-    # plantilla, por defecto) y la interfaz web se quedo atras entregando el
-    # formato viejo -- que es el que ve el usuario que abre el .exe.
     salida = carpeta / ("PT_ReteICA_%s.xlsx" % corr)
     depositar(ctx, salida)
     _PAPELES[corr] = salida
@@ -259,15 +398,13 @@ async def analizar(
     return {"corrida": corr, "descarga": "/descargar/%s" % corr, "resumen": resumen}
 
 
-@app.get("/salir", response_class=HTMLResponse)
-def salir() -> str:
-    """Apaga la aplicacion. Es como el usuario cierra un .exe sin consola."""
-    import os
-
-    threading.Timer(0.4, lambda: os._exit(0)).start()
-    return ("<html><body style='font-family:Segoe UI,sans-serif;text-align:center;"
-            "margin-top:80px;color:#001871'><h2>Motor de Revision de ReteICA cerrado</h2>"
-            "<p>Ya puede cerrar esta pestaña.</p></body></html>")
+@app.get("/salir")
+def salir(request: Request, response: Response) -> dict:
+    token = request.cookies.get(COOKIE)
+    if token:
+        db.borrar_sesion(hash_token(token))
+    response.delete_cookie(COOKIE, path="/")
+    return {"ok": True}
 
 
 @app.get("/descargar/{corr}")
