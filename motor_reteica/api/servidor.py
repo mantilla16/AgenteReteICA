@@ -82,19 +82,28 @@ def _cerrar() -> None:
 @app.middleware("http")
 async def exigir_sesion(request: Request, call_next):
     ruta = request.url.path
-    if request.method == "OPTIONS" or ruta in PUBLICAS:
+
+    # Detectar base path (ej: /reteica)
+    base = ""
+    partes = ruta.split("/")
+    if len(partes) > 2 and partes[1]:
+        base = "/" + partes[1]
+
+    ruta_relativa = ruta[len(base):] if base else ruta
+
+    if request.method == "OPTIONS" or ruta_relativa in PUBLICAS:
         return await call_next(request)
 
     # Permitir archivos estaticos
-    if ruta.startswith("/login") or ruta.endswith((".css", ".js", ".ico", ".png")):
+    if ruta_relativa.startswith("/login") or ruta_relativa.endswith((".css", ".js", ".ico", ".png")):
         return await call_next(request)
 
     token = request.cookies.get(COOKIE)
     u = db.usuario_de_sesion(hash_token(token)) if token else None
     if not u:
-        if ruta.startswith("/auth/"):
+        if ruta_relativa.startswith("/auth/"):
             return await call_next(request)
-        return RedirectResponse(url="/login", status_code=302)
+        return RedirectResponse(url=base + "/login", status_code=302)
 
     request.state.usuario = u
     return await call_next(request)
