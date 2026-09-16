@@ -15,3 +15,8 @@ papel_reteica_*
 !papel_reteica_*.xlsx
 web/_muestra.json
 _arranque_prueba.py
+
+# Credenciales: el DSN de la base y la clave del SMTP viven en /etc/reteica.env
+# en el servidor, nunca en el repositorio.
+*.env
+reteica.env

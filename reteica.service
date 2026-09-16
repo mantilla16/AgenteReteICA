@@ -10,6 +10,9 @@ ExecStart=/opt/reteica/venv/bin/gunicorn motor_reteica.api.servidor:app -c gunic
 Restart=always
 RestartSec=5
 Environment="PYTHONUNBUFFERED=1"
+# Credenciales (AUDITORIA_DSN, SMTP). Vive fuera del repo, root:root chmod 600.
+# El guion inicial hace que el servicio arranque aunque el archivo no exista.
+EnvironmentFile=-/etc/reteica.env
 StandardOutput=journal
 StandardError=journal
 

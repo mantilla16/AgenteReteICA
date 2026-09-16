@@ -72,6 +72,19 @@ const BASE = (() => {
 
 let correoActual = "";
 
+// El servidor responde JSON cuando puede, pero ante una falla interna uvicorn
+// devuelve texto plano ("Internal Server Error"). Parsear eso como JSON tapaba
+// el error real con un SyntaxError, asi que leemos el cuerpo tal cual y solo
+// intentamos interpretarlo.
+async function leerRespuesta(r) {
+  const cuerpo = await r.text();
+  try {
+    return JSON.parse(cuerpo);
+  } catch {
+    return {detail: cuerpo.trim() || `Error ${r.status} del servidor.`};
+  }
+}
+
 document.getElementById("btn-codigo").onclick = async () => {
   const correo = document.getElementById("correo").value.trim();
   const msg = document.getElementById("msg1");
@@ -87,7 +100,7 @@ document.getElementById("btn-codigo").onclick = async () => {
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({correo})
     });
-    const data = await r.json();
+    const data = await leerRespuesta(r);
     if (!r.ok) { msg.className = "msg error"; msg.textContent = data.detail || "Error"; return; }
     correoActual = correo;
     document.getElementById("paso-correo").style.display = "none";
@@ -116,7 +129,7 @@ document.getElementById("btn-entrar").onclick = async () => {
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({correo: correoActual, codigo})
     });
-    const data = await r.json();
+    const data = await leerRespuesta(r);
     if (!r.ok) { msg.className = "msg error"; msg.textContent = data.detail || "Codigo incorrecto"; return; }
     window.location.href = BASE + "/";
   } catch(e) {

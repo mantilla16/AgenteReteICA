@@ -37,20 +37,56 @@ echo "Configurando permisos..."
 sudo chown -R $APP_USER:$APP_USER $APP_DIR
 sudo chown -R $APP_USER:$APP_USER $LOG_DIR
 
-# 6. Instalar servicio systemd
+# 6. Archivo de credenciales (fuera del repo: nunca se versiona)
+if [ ! -f /etc/reteica.env ]; then
+    echo "Creando plantilla /etc/reteica.env..."
+    sudo tee /etc/reteica.env >/dev/null <<'EOF'
+# Credenciales del Motor de ReteICA. NO versionar.
+# Debe apuntar a la misma base de analitica-puc.
+AUDITORIA_DSN=postgresql://USUARIO:CLAVE@localhost:5432/auditoria_puc
+
+# Envio del codigo de acceso. Sin esto el codigo solo se escribe en el log.
+AUDITORIA_CORREO_MODO=CONSOLA
+#AUDITORIA_SMTP_HOST=smtp.office365.com
+#AUDITORIA_SMTP_PUERTO=587
+#AUDITORIA_SMTP_USUARIO=
+#AUDITORIA_SMTP_CLAVE=
+#AUDITORIA_CORREO_DE=
+EOF
+    sudo chown root:root /etc/reteica.env
+    sudo chmod 600 /etc/reteica.env
+    echo "  !! Edite /etc/reteica.env con las credenciales reales antes de usar."
+fi
+
+# 7. Esquema de autenticacion (idempotente: CREATE ... IF NOT EXISTS)
+echo "Aplicando schema_auth.sql..."
+# shellcheck disable=SC1091
+set +e
+. /etc/reteica.env 2>/dev/null
+if [ -n "$AUDITORIA_DSN" ] && command -v psql >/dev/null 2>&1; then
+    sudo -u postgres psql "$AUDITORIA_DSN" -f $APP_DIR/schema_auth.sql \
+        && echo "  schema aplicado." \
+        || echo "  !! No se pudo aplicar el schema. Revise AUDITORIA_DSN en /etc/reteica.env"
+else
+    echo "  !! Omitido (falta psql o AUDITORIA_DSN). Aplicar a mano:"
+    echo "     psql \"\$AUDITORIA_DSN\" -f $APP_DIR/schema_auth.sql"
+fi
+set -e
+
+# 8. Instalar servicio systemd
 echo "Instalando servicio systemd..."
 sudo cp $APP_DIR/reteica.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable $APP_NAME
 
-# 7. Configurar Nginx
+# 9. Configurar Nginx
 echo "Configurando Nginx..."
 sudo cp $APP_DIR/reteica_nginx.conf /etc/nginx/sites-available/$APP_NAME
 sudo ln -sf /etc/nginx/sites-available/$APP_NAME /etc/nginx/sites-enabled/
 sudo rm -f /etc/nginx/sites-enabled/default
 sudo nginx -t && sudo systemctl reload nginx
 
-# 8. Iniciar servicio
+# 10. Iniciar servicio
 echo "Iniciando servicio..."
 sudo systemctl start $APP_NAME
 
