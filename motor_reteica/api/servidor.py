@@ -17,8 +17,8 @@ from decimal import Decimal
 from pathlib import Path
 
 import openpyxl
-from fastapi import (FastAPI, File, Form, HTTPException, Request, Response,
-                     UploadFile)
+from fastapi import (BackgroundTasks, FastAPI, File, Form, HTTPException,
+                     Request, Response, UploadFile)
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel
 
@@ -471,9 +471,31 @@ async def analizar(
         nombre = Path(subida.filename or "archivo").name
         (carpeta / nombre).write_bytes(await subida.read())
 
-    return await _revisar_encargo(
-        request, enc, nit=nit, periodo=periodo, municipio=municipio,
+    corr = uuid.uuid4().hex[:12]
+    resumen, salida = _ejecutar_revision(
+        corr, enc, nit=nit, periodo=periodo, municipio=municipio,
         declarado_por=declarado_por, api_key=api_key)
+
+    # El registro no puede tumbar una revision que ya se hizo: si la base
+    # falla, el auditor igual recibe su papel y la respuesta lo dice, en vez
+    # de perder el trabajo por una fila que no se escribio.
+    registrada = True
+    try:
+        db.guardar_revision(
+            corrida=corr, usuario_id=request.state.usuario["id"], nit=nit,
+            razon_social=resumen.get("razon_social"), periodo=periodo,
+            municipio=MUNICIPIOS[municipio].nombre,
+            declarado_por=declarado_por or None, resumen=resumen,
+            ruta_papel=str(salida), encargo=enc)
+    except Exception as error:
+        registrada = False
+        print("[revision] no se pudo registrar %s: %s" % (corr, error),
+              flush=True)
+
+    return {"corrida": corr, "encargo": enc,
+            "descarga": "/descargar/%s" % corr,
+            "resumen": resumen, "registrada": registrada,
+            "tablero": _tablero(carpeta)}
 
 
 # --------------------------------------------------------------------------
@@ -539,24 +561,68 @@ def quitar_documento(enc: str, nombre: str, request: Request) -> dict:
 
 
 @app.post("/encargos/{enc}/revisar")
-async def revisar_encargo(
-    enc: str, request: Request,
+def revisar_encargo(
+    enc: str, request: Request, tareas: BackgroundTasks,
     nit: str = Form(...), periodo: str = Form(...),
     municipio: str = Form("santa_marta"),
     declarado_por: str = Form(""), api_key: str = Form(""),
 ):
+    """Arranca la revision y contesta de inmediato.
+
+    La revision tarda minutos: el modelo corre en CPU y hay que leer PDFs y
+    Excel. Hacerla dentro de la peticion significaba que nginx cortara a los
+    120 segundos con un 504 mientras el motor seguia trabajando, y que el
+    auditor mirara un "Procesando..." mudo sin saber si seguia viva.
+
+    Ahora la fila nace 'en_proceso' y un hilo la termina. Ninguna peticion
+    dura mas de un instante, asi que ningun timeout intermedio importa, y si
+    el navegador se cae la revision sigue y aparece en el historial.
+    """
     _exigir_encargo(enc, request)
-    return await _revisar_encargo(
-        request, enc, nit=nit, periodo=periodo, municipio=municipio,
-        declarado_por=declarado_por, api_key=api_key)
-
-
-async def _revisar_encargo(request: Request, enc: str, *, nit: str,
-                           periodo: str, municipio: str, declarado_por: str,
-                           api_key: str):
     if municipio not in MUNICIPIOS:
         raise HTTPException(400, "Municipio no soportado: %s" % municipio)
 
+    corr = uuid.uuid4().hex[:12]
+    db.crear_revision_en_proceso(
+        corrida=corr, usuario_id=request.state.usuario["id"], nit=nit,
+        periodo=periodo, municipio=MUNICIPIOS[municipio].nombre,
+        declarado_por=declarado_por or None, encargo=enc)
+
+    # Funcion sincrona: Starlette la corre en un hilo aparte, asi el worker
+    # sigue contestando las preguntas por el avance mientras el motor trabaja.
+    tareas.add_task(_correr_revision, corr, enc, nit, periodo, municipio,
+                    declarado_por, api_key)
+    return {"corrida": corr, "encargo": enc, "estado": "en_proceso"}
+
+
+def _correr_revision(corr: str, enc: str, nit: str, periodo: str,
+                     municipio: str, declarado_por: str, api_key: str) -> None:
+    """El trabajo pesado, fuera de la peticion. Nunca lanza."""
+    try:
+        resumen, salida = _ejecutar_revision(
+            corr, enc, nit=nit, periodo=periodo, municipio=municipio,
+            declarado_por=declarado_por, api_key=api_key,
+            avisar=lambda paso: db.marcar_progreso(corr, paso))
+        db.terminar_revision(corr, resumen.get("razon_social"), resumen,
+                             str(salida))
+        db.tocar_encargo(enc, nit=nit, periodo=periodo,
+                         municipio=MUNICIPIOS[municipio].nombre,
+                         declarado_por=declarado_por,
+                         razon_social=resumen.get("razon_social"))
+    except Exception as error:
+        # Una revision que fallo no desaparece: queda en el historial con el
+        # motivo, que es lo que el auditor necesita para saber que hacer.
+        db.fallar_revision(corr, "%s: %s" % (type(error).__name__, error))
+        print("[revision] %s fallo: %s" % (corr, error), flush=True)
+
+
+def _ejecutar_revision(corr: str, enc: str, *, nit: str, periodo: str,
+                       municipio: str, declarado_por: str, api_key: str,
+                       avisar=lambda paso: None):
+    if municipio not in MUNICIPIOS:
+        raise HTTPException(400, "Municipio no soportado: %s" % municipio)
+
+    avisar("Reconociendo los documentos")
     carpeta = _carpeta_encargo(enc)
     rutas = sorted(p for p in carpeta.iterdir()
                    if p.is_file() and p.name != NOMBRE_ARCHIVO)
@@ -564,7 +630,6 @@ async def _revisar_encargo(request: Request, enc: str, *, nit: str,
     if conflictos:
         raise HTTPException(400, "; ".join(conflictos))
 
-    corr = uuid.uuid4().hex[:12]
     manifiesto = {
         "nit": nit, "periodo": periodo, "municipio": MUNICIPIOS[municipio].nombre,
         "declarado_por": declarado_por or "sin declarar",
@@ -585,6 +650,7 @@ async def _revisar_encargo(request: Request, enc: str, *, nit: str,
     else:
         cliente_ia = None
 
+    avisar("Leyendo los insumos y corriendo los controles")
     try:
         ctx = revisar(carpeta, nit=nit, periodo=periodo,
                       municipio=MUNICIPIOS[municipio], cliente_ia=cliente_ia)
@@ -595,37 +661,13 @@ async def _revisar_encargo(request: Request, enc: str, *, nit: str,
     # El papel va al archivo permanente. La carpeta del encargo NO se borra:
     # es lo que permite volver, agregar el balance que faltaba o reemplazar un
     # archivo mal exportado, y revisar otra vez sin subirlo todo de nuevo.
+    avisar("Escribiendo el papel de trabajo")
     salida = _deposito_papeles() / ("%s.xlsx" % corr)
     depositar(ctx, salida)
 
     resumen = _resumen(ctx)
     resumen["sin_clasificar"] = sin_clasificar
-
-    # El registro no puede tumbar una revision que ya se hizo: si la base
-    # falla, el auditor igual recibe su papel y la respuesta lo dice, en vez
-    # de perder diez minutos de trabajo por una fila que no se escribio.
-    registrada = True
-    try:
-        usuario = request.state.usuario
-        db.guardar_revision(
-            corrida=corr, usuario_id=usuario["id"], nit=nit,
-            razon_social=resumen.get("razon_social"), periodo=periodo,
-            municipio=MUNICIPIOS[municipio].nombre,
-            declarado_por=declarado_por or None, resumen=resumen,
-            ruta_papel=str(salida), encargo=enc)
-        db.tocar_encargo(enc, nit=nit, periodo=periodo,
-                         municipio=MUNICIPIOS[municipio].nombre,
-                         declarado_por=declarado_por,
-                         razon_social=resumen.get("razon_social"))
-    except Exception as error:
-        registrada = False
-        print("[revision] no se pudo registrar %s: %s" % (corr, error),
-              flush=True)
-
-    return {"corrida": corr, "encargo": enc,
-            "descarga": "/descargar/%s" % corr,
-            "resumen": resumen, "registrada": registrada,
-            "tablero": _tablero(carpeta)}
+    return resumen, salida
 
 
 # --------------------------------------------------------------------------

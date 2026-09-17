@@ -119,3 +119,71 @@ def test_un_encargo_ajeno_no_se_toca(cliente, monkeypatch):
 def test_un_id_que_no_es_un_encargo_no_toca_el_disco(cliente):
     respuesta = cliente.get("/encargos/..%2f..%2fetc")
     assert respuesta.status_code == 404
+
+
+# --------------------------------------------------------------------------
+# La revision ya no corre dentro de la peticion
+# --------------------------------------------------------------------------
+
+def test_revisar_contesta_de_inmediato_y_deja_la_fila_en_proceso(
+        cliente, monkeypatch):
+    """El 504 venia de aqui: la peticion duraba lo que durara el motor.
+
+    Ahora contesta al instante con el id de la corrida, y el trabajo queda en
+    un hilo. Ningun timeout intermedio -- nginx, Tailscale -- alcanza a
+    dispararse, porque ninguna peticion espera.
+    """
+    creadas, corridas = [], []
+    monkeypatch.setattr(servidor.db, "crear_revision_en_proceso",
+                        lambda **c: creadas.append(c))
+    monkeypatch.setattr(servidor, "_correr_revision",
+                        lambda *a: corridas.append(a))
+
+    enc = cliente.post("/encargos").json()["encargo"]
+    _subir(cliente, enc, BASE / "borrador.pdf")
+    _subir(cliente, enc, BASE / "auxiliar_2368.xlsx")
+
+    respuesta = cliente.post("/encargos/%s/revisar" % enc,
+                             data={"nit": "819002433", "periodo": "2026-07"})
+    assert respuesta.status_code == 200
+    cuerpo = respuesta.json()
+    assert cuerpo["estado"] == "en_proceso"
+    assert cuerpo["corrida"]
+
+    assert creadas[0]["corrida"] == cuerpo["corrida"]
+    assert creadas[0]["encargo"] == enc
+    assert corridas, "el trabajo tiene que quedar agendado"
+
+
+def test_una_revision_que_falla_queda_registrada_con_el_motivo(monkeypatch):
+    """No puede desaparecer: el auditor tiene que ver que la intento."""
+    fallos = []
+    monkeypatch.setattr(servidor.db, "fallar_revision",
+                        lambda corrida, error: fallos.append((corrida, error)))
+    monkeypatch.setattr(servidor.db, "terminar_revision",
+                        lambda *a, **k: None)
+
+    def revienta(*a, **k):
+        raise RuntimeError("el auxiliar no tiene la columna de retencion")
+    monkeypatch.setattr(servidor, "_ejecutar_revision", revienta)
+
+    servidor._correr_revision("abc123abc123", "def456def456", "819002433",
+                              "2026-07", "santa_marta", "", "")
+
+    assert fallos, "un fallo silencioso es peor que el fallo"
+    assert "columna de retencion" in fallos[0][1]
+
+
+def test_el_progreso_se_va_contando(monkeypatch, tmp_path):
+    """Para que la pantalla diga en que va, en vez de un 'Procesando' mudo."""
+    pasos = []
+    monkeypatch.setattr(servidor, "_ENCARGOS", tmp_path)
+    (tmp_path / "abc123abc123").mkdir()
+    try:
+        servidor._ejecutar_revision(
+            "111111111111", "abc123abc123", nit="1", periodo="2026-07",
+            municipio="santa_marta", declarado_por="", api_key="",
+            avisar=pasos.append)
+    except Exception:
+        pass          # sin documentos revienta; lo que importa es el aviso
+    assert pasos and "Reconociendo" in pasos[0]

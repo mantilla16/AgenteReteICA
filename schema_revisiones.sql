@@ -60,6 +60,19 @@ CREATE INDEX IF NOT EXISTS ix_revision_usuario
 CREATE INDEX IF NOT EXISTS ix_revision_cliente
   ON reteica.revision (usuario_id, nit, periodo, creado_en DESC);
 
+-- La revision ya no corre dentro de la peticion HTTP: nace "en_proceso" y un
+-- hilo la termina. La fila ES el estado del trabajo, y por eso funciona con
+-- varios workers de gunicorn -- un diccionario en memoria no serviria, como
+-- ya nos paso con las descargas.
+ALTER TABLE reteica.revision
+  ADD COLUMN IF NOT EXISTS estado   text NOT NULL DEFAULT 'lista',
+  ADD COLUMN IF NOT EXISTS progreso text,
+  ADD COLUMN IF NOT EXISTS error    text;
+
+-- Mientras esta en proceso todavia no hay resumen ni papel.
+ALTER TABLE reteica.revision ALTER COLUMN resumen    DROP NOT NULL;
+ALTER TABLE reteica.revision ALTER COLUMN ruta_papel DROP NOT NULL;
+
 -- De que encargo salio esta corrida. Se agrega aparte porque la tabla ya
 -- existe en produccion con revisiones dentro: las viejas quedan en NULL, que
 -- es la verdad (se hicieron antes de que los documentos se conservaran).

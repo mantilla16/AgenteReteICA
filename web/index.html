@@ -718,6 +718,43 @@ $("#nueva").onclick = () => {
   window.scrollTo(0, 0);
 };
 
+/* Sigue una revision que ya arranco en el servidor.
+
+   Pregunta cada dos segundos. El trabajo NO depende de esta pagina: si el
+   auditor cierra el navegador, la revision termina igual y aparece en el
+   historial -- antes, con la revision corriendo dentro de la peticion, un
+   corte se llevaba todo por delante. */
+async function seguirRevision(corrida){
+  const msg = $("#msg");
+  const desde = Date.now();
+  for(;;){
+    const r = await fetch(BASE + "/revisiones/" + corrida);
+    const data = await leerRespuesta(r);
+    if(!r.ok){ msg.innerHTML = avisoError(data.detail || "Se perdio el rastro de la revision"); return; }
+
+    if(data.estado === "lista"){
+      $("#nit").value = data.nit || $("#nit").value;
+      pintar({resumen: data.resumen, descarga: data.descarga,
+              corrida: data.corrida});
+      $("#completar").style.display = "";
+      return;
+    }
+    if(data.estado === "fallo"){
+      msg.innerHTML = avisoError("La revision no pudo terminar. " + (data.error || ""));
+      return;
+    }
+
+    const min = Math.floor((Date.now() - desde) / 60000);
+    const seg = Math.floor(((Date.now() - desde) % 60000) / 1000);
+    msg.innerHTML = `<div class="aviso info" style="display:block;margin-top:12px"><div class="cuerpo">
+        ${data.progreso || "Procesando"}…
+        <span style="opacity:.7">(${min}:${String(seg).padStart(2,"0")})</span><br>
+        <span style="font-size:12px;opacity:.7">Puede cerrar esta pagina: la revision sigue y quedara en el historial.</span>
+      </div></div>`;
+    await new Promise(r => setTimeout(r, 2000));
+  }
+}
+
 /* Completar: el encargo sigue vivo con todo lo que ya se subio. */
 $("#completar").onclick = async () => {
   if(!encargo){ return; }
@@ -748,15 +785,11 @@ $("#run").onclick = async () => {
     const r = await fetch(BASE + "/encargos/" + encargo + "/revisar",
                           { method:"POST", body:fd });
     const data = await leerRespuesta(r);
-    if(!r.ok){ msg.innerHTML = `<div class="aviso error" style="margin-top:12px"><div class="cuerpo">${data.detail||"Error"}</div></div>`; return; }
-    pintar(data);
-    $("#completar").style.display = "";
-    // El papel esta hecho y se puede descargar; lo que fallo es la fila del
-    // historial. Se dice, porque si no, manana esa revision no aparece y
-    // nadie sabe por que.
-    if(data.registrada === false){
-      $("#msg").innerHTML = `<div class="aviso alerta" style="margin-top:12px"><div class="cuerpo">La revision se genero y puede descargarla, pero no quedo registrada en el historial.</div></div>`;
-    }
+    if(!r.ok){ msg.innerHTML = avisoError(data.detail || "Error"); return; }
+    // La revision arranco y el servidor ya contesto. De aqui en adelante se
+    // pregunta por el avance: ninguna peticion queda esperando minutos, que
+    // es lo que hacia que nginx cortara con un 504.
+    await seguirRevision(data.corrida);
     cargarClientes(); cargarHistorial();
   } catch(e){ msg.innerHTML = `<div class="aviso error" style="margin-top:12px"><div class="cuerpo">${e}</div></div>`; }
   finally { $("#run").disabled = false; $("#run").textContent = "Revisar y generar papel"; }
@@ -897,8 +930,12 @@ async function cargarHistorial(){
         <th>Revisada</th><th style="text-align:right">Impacto</th><th></th>
       </tr></thead><tbody>${data.revisiones.map(v => `
         <tr>
-          <td><span title="${v.semaforo||""}" style="display:inline-block;width:9px;height:9px;
-              border-radius:50%;background:${SEMAFORO_PUNTO[v.semaforo]||"#9aa0a6"}"></span></td>
+          <td>${v.estado === "en_proceso"
+              ? `<span title="${v.progreso||"en proceso"}">◌</span>`
+              : v.estado === "fallo"
+              ? `<span title="no pudo terminar" style="color:var(--rojo)">!</span>`
+              : `<span title="${v.semaforo||""}" style="display:inline-block;width:9px;height:9px;
+                 border-radius:50%;background:${SEMAFORO_PUNTO[v.semaforo]||"#9aa0a6"}"></span>`}</td>
           <td>${v.razon_social || "—"}</td>
           <td class="cifra">${v.nit}</td>
           <td class="cifra">${v.periodo}</td>
@@ -934,6 +971,15 @@ async function abrirRevision(corrida){
   // sobre una revision vieja. Las de antes de los encargos no lo tienen.
   encargo = data.encargo || null;
   $("#completar").style.display = encargo ? "" : "none";
+
+  // Una revision del historial puede estar todavia corriendo -- se lanzo y el
+  // auditor cerro la pagina. Se retoma el seguimiento en vez de intentar
+  // pintar un resumen que aun no existe.
+  if(data.estado === "en_proceso"){ await seguirRevision(corrida); return; }
+  if(data.estado === "fallo"){
+    $("#msg").innerHTML = avisoError("Esa revision no pudo terminar. " + (data.error || ""));
+    return;
+  }
   pintar({resumen: data.resumen, descarga: data.descarga, corrida: data.corrida});
   if(!data.papel_disponible){
     $("#msg").innerHTML = `<div class="aviso alerta" style="margin-top:12px"><div class="cuerpo">El registro existe pero el archivo del papel ya no esta en el servidor.</div></div>`;

@@ -187,6 +187,54 @@ def guardar_revision(corrida: str, usuario_id: str, nit: str,
     )
 
 
+def crear_revision_en_proceso(corrida: str, usuario_id: str, nit: str,
+                              periodo: str, municipio: str,
+                              declarado_por: str | None,
+                              encargo: str) -> None:
+    """La fila nace antes de que el trabajo empiece.
+
+    Es lo que permite que la pantalla pregunte por el avance y que, si el
+    navegador se cae, la revision siga y aparezca despues en el historial.
+    """
+    ejecutar(
+        """INSERT INTO reteica.revision
+             (corrida, usuario_id, nit, periodo, municipio, declarado_por,
+              encargo, estado, progreso)
+           VALUES (%s,%s,%s,%s,%s,%s,%s,'en_proceso','Preparando')""",
+        (corrida, usuario_id, nit, periodo, municipio, declarado_por, encargo),
+    )
+
+
+def marcar_progreso(corrida: str, progreso: str) -> None:
+    ejecutar("UPDATE reteica.revision SET progreso=%s WHERE corrida=%s",
+             (progreso, corrida))
+
+
+def terminar_revision(corrida: str, razon_social: str | None, resumen: dict,
+                      ruta_papel: str) -> None:
+    semaforo = (resumen.get("semaforo") or {}).get("color")
+    ejecutar(
+        """UPDATE reteica.revision
+              SET estado='lista', progreso=NULL, razon_social=%s,
+                  semaforo=%s, conclusion=%s, impacto_total=%s,
+                  puede_concluir_limpio=%s, resumen=%s, ruta_papel=%s
+            WHERE corrida=%s""",
+        (razon_social, semaforo, resumen.get("conclusion"),
+         resumen.get("impacto_total"), resumen.get("puede_concluir_limpio"),
+         json.dumps(resumen, default=str), ruta_papel, corrida),
+    )
+
+
+def fallar_revision(corrida: str, error: str) -> None:
+    """Una revision que fallo NO se borra: el auditor tiene que poder ver que
+    la intento y por que no salio, en vez de que desaparezca sin rastro."""
+    ejecutar(
+        """UPDATE reteica.revision
+              SET estado='fallo', progreso=NULL, error=%s WHERE corrida=%s""",
+        (error[:2000], corrida),
+    )
+
+
 def revisiones_de(usuario_id: str, nit: str | None = None,
                   limite: int = 100) -> list[dict]:
     """La lista para el historial. Sin el resumen: pesa y no se muestra ahi."""
@@ -194,7 +242,7 @@ def revisiones_de(usuario_id: str, nit: str | None = None,
         return varios(
             """SELECT corrida, nit, razon_social, periodo, municipio,
                       declarado_por, creado_en, semaforo, impacto_total,
-                      puede_concluir_limpio
+                      puede_concluir_limpio, estado, progreso
                  FROM reteica.revision
                 WHERE usuario_id=%s AND nit=%s
                 ORDER BY creado_en DESC LIMIT %s""",
@@ -202,7 +250,7 @@ def revisiones_de(usuario_id: str, nit: str | None = None,
     return varios(
         """SELECT corrida, nit, razon_social, periodo, municipio,
                   declarado_por, creado_en, semaforo, impacto_total,
-                  puede_concluir_limpio
+                  puede_concluir_limpio, estado, progreso
              FROM reteica.revision
             WHERE usuario_id=%s
             ORDER BY creado_en DESC LIMIT %s""",
@@ -246,7 +294,7 @@ def tocar_encargo(encargo_id: str, **campos) -> None:
 def revisiones_del_encargo(encargo_id: str) -> list[dict]:
     return varios(
         """SELECT corrida, creado_en, semaforo, impacto_total,
-                  puede_concluir_limpio
+                  puede_concluir_limpio, estado, progreso
              FROM reteica.revision WHERE encargo=%s
             ORDER BY creado_en DESC""",
         (encargo_id,))
