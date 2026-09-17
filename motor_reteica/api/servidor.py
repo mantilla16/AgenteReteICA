@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import tempfile
 import uuid
@@ -52,7 +53,26 @@ MUNICIPIOS = {"santa_marta": MUNICIPIO}
 _RAIZ = Path(tempfile.gettempdir()) / "motor_reteica_web"
 _RAIZ.mkdir(exist_ok=True)
 _WEB = ruta_recurso("web")
-_PAPELES: dict[str, Path] = {}
+
+# La corrida es uuid4().hex[:12]. Se valida antes de tocar el disco: el id
+# viaja en la URL y sin esto un ../.. serviria cualquier archivo del servidor.
+_RE_CORRIDA = re.compile(r"^[0-9a-f]{12}$")
+
+
+def _ruta_papel(corr: str) -> Path | None:
+    """Donde quedo el papel de una corrida.
+
+    Antes esto era un diccionario en memoria, y ahi estaba el defecto: con
+    varios workers de gunicorn, el POST que genera el papel y el GET que lo
+    descarga caen en procesos distintos. El que descarga tiene el diccionario
+    vacio y contesta "Papel no encontrado" sobre un archivo que existe. La
+    ruta es determinista, asi que no hay nada que recordar.
+    """
+    if not _RE_CORRIDA.match(corr or ""):
+        return None
+    ruta = _RAIZ / corr / ("PT_ReteICA_%s.xlsx" % corr)
+    return ruta if ruta.exists() else None
+
 
 COOKIE = "sesion_reteica"
 SESION_HORAS = int(os.getenv("SESION_HORAS", "12"))
@@ -406,7 +426,6 @@ async def analizar(
 
     salida = carpeta / ("PT_ReteICA_%s.xlsx" % corr)
     depositar(ctx, salida)
-    _PAPELES[corr] = salida
 
     resumen = _resumen(ctx)
     resumen["sin_clasificar"] = sin_clasificar
@@ -424,8 +443,8 @@ def salir(request: Request, response: Response) -> dict:
 
 @app.get("/descargar/{corr}")
 def descargar(corr: str):
-    ruta = _PAPELES.get(corr)
-    if not ruta or not ruta.exists():
+    ruta = _ruta_papel(corr)
+    if ruta is None:
         raise HTTPException(404, "Papel no encontrado o expirado.")
     return FileResponse(str(ruta), filename=ruta.name,
                         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
