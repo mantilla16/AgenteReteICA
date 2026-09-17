@@ -39,6 +39,7 @@ from ..manifiesto import NOMBRE_ARCHIVO, ManifiestoIncompleto
 from ..plantilla.deposito import depositar
 from ..parametros.columnas import ColumnaNoIdentificada, detectar_tipo_documento
 from ..parametros.municipios.santa_marta import MUNICIPIO
+from ..parametros.municipios.perfiles import perfil_para
 from ..pipeline import revisar
 from ..recursos import ruta_recurso
 from ..semaforo import evaluar
@@ -125,6 +126,18 @@ def _tablero(carpeta: Path) -> dict:
     en_riesgo = sorted({c for r in faltan
                         for c in CONTROLES_POR_INSUMO.get(r, ())})
 
+    # Si ya subieron el borrador, se lee y se ofrecen los cuatro datos para
+    # que el auditor confirme antes de correr. Sin borrador, la clave viaja
+    # vacia y la pantalla no muestra la tarjeta.
+    lectura = {}
+    if roles.get("borrador"):
+        try:
+            from ..ingesta.borrador_universal import leer_borrador_universal
+            lectura = leer_borrador_universal(
+                carpeta / roles["borrador"]).como_dict()
+        except Exception as error:
+            lectura = {"error": "%s: %s" % (type(error).__name__, error)}
+
     return {
         "insumos": {**roles, "facturas": facturas or None},
         "facturas": facturas,
@@ -135,6 +148,7 @@ def _tablero(carpeta: Path) -> dict:
         "controles_en_riesgo": en_riesgo,
         "puede_revisar": not conflictos and all(r in presentes
                                                 for r in OBLIGATORIOS),
+        "lectura_borrador": lectura,
     }
 
 
@@ -566,6 +580,10 @@ def revisar_encargo(
     nit: str = Form(...), periodo: str = Form(...),
     municipio: str = Form("santa_marta"),
     declarado_por: str = Form(""), api_key: str = Form(""),
+    # Lo que el auditor confirmo del borrador desde la tarjeta. Si viene, gana
+    # sobre lo que la extraccion automatica leyo -- D9: el motor propone, el
+    # auditor confirma.
+    total_confirmado: str = Form(""),
 ):
     """Arranca la revision y contesta de inmediato.
 
@@ -591,17 +609,19 @@ def revisar_encargo(
     # Funcion sincrona: Starlette la corre en un hilo aparte, asi el worker
     # sigue contestando las preguntas por el avance mientras el motor trabaja.
     tareas.add_task(_correr_revision, corr, enc, nit, periodo, municipio,
-                    declarado_por, api_key)
+                    declarado_por, api_key, total_confirmado)
     return {"corrida": corr, "encargo": enc, "estado": "en_proceso"}
 
 
 def _correr_revision(corr: str, enc: str, nit: str, periodo: str,
-                     municipio: str, declarado_por: str, api_key: str) -> None:
+                     municipio: str, declarado_por: str, api_key: str,
+                     total_confirmado: str = "") -> None:
     """El trabajo pesado, fuera de la peticion. Nunca lanza."""
     try:
         resumen, salida = _ejecutar_revision(
             corr, enc, nit=nit, periodo=periodo, municipio=municipio,
             declarado_por=declarado_por, api_key=api_key,
+            total_confirmado=total_confirmado,
             avisar=lambda paso: db.marcar_progreso(corr, paso))
         db.terminar_revision(corr, resumen.get("razon_social"), resumen,
                              str(salida))
@@ -618,6 +638,7 @@ def _correr_revision(corr: str, enc: str, nit: str, periodo: str,
 
 def _ejecutar_revision(corr: str, enc: str, *, nit: str, periodo: str,
                        municipio: str, declarado_por: str, api_key: str,
+                       total_confirmado: str = "",
                        avisar=lambda paso: None):
     if municipio not in MUNICIPIOS:
         raise HTTPException(400, "Municipio no soportado: %s" % municipio)
@@ -663,11 +684,33 @@ def _ejecutar_revision(corr: str, enc: str, *, nit: str, periodo: str,
     # archivo mal exportado, y revisar otra vez sin subirlo todo de nuevo.
     avisar("Escribiendo el papel de trabajo")
     salida = _deposito_papeles() / ("%s.xlsx" % corr)
-    depositar(ctx, salida)
+    # El total confirmado por el auditor viaja en el papel para el cruce
+    # universal (declarado vs auxiliar). Es el unico dato que la extraccion
+    # NO puede afirmar sola: lo pone el auditor con la cifra que ve en el PDF.
+    depositar(ctx, salida,
+              total_declarado_confirmado=_confirmar_total(total_confirmado))
 
     resumen = _resumen(ctx)
     resumen["sin_clasificar"] = sin_clasificar
     return resumen, salida
+
+
+def _confirmar_total(valor: str) -> Decimal | None:
+    """Lo que el auditor tecleo en la tarjeta, si tecleo algo.
+
+    Acepta '2.880.000', '2880000', '2 880 000'. Un texto que no pueda
+    interpretarse se descarta -- el motor prefiere no tener el dato antes que
+    afirmar una cifra inventada.
+    """
+    if not valor:
+        return None
+    limpio = re.sub(r"[^\d]", "", valor)
+    if not limpio:
+        return None
+    try:
+        return Decimal(limpio)
+    except Exception:
+        return None
 
 
 # --------------------------------------------------------------------------

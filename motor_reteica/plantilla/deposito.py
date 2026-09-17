@@ -25,6 +25,7 @@ facturas.
 
 import warnings
 from datetime import date
+from decimal import Decimal
 from pathlib import Path
 
 import openpyxl
@@ -732,8 +733,16 @@ def _depositar_conclusiones(libro, ctx) -> None:
     libro[hoja][celda] = "Conclusion: %s" % ctx.informe.conclusion
 
 
-def depositar(ctx, destino, plantilla: Path = None) -> Path:
-    """Escribe el papel final a partir de la plantilla de la firma."""
+def depositar(ctx, destino, plantilla: Path = None,
+              total_declarado_confirmado=None) -> Path:
+    """Escribe el papel final a partir de la plantilla de la firma.
+
+    `total_declarado_confirmado` es lo que el auditor confirmo del borrador
+    en el tablero. Si viene, el papel trae un bloque de CRUCE UNIVERSAL --
+    declarado vs auxiliar, con la diferencia-- que funciona en cualquier
+    municipio porque solo depende de dos numeros: el que el auditor confirmo
+    y la suma de la cuenta 2368 en el auxiliar del cliente.
+    """
     plantilla = Path(plantilla or PLANTILLA)
     with warnings.catch_warnings():
         # openpyxl avisa que descarta el EMF al cargar; fidelidad.py lo
@@ -749,6 +758,62 @@ def depositar(ctx, destino, plantilla: Path = None) -> Path:
     _depositar_facturas(libro, ctx)
     _depositar_borrador_terlica(libro, ctx)
     _depositar_revision_ica(libro, ctx)
+    _depositar_cruce_universal(libro, ctx, total_declarado_confirmado)
     _depositar_conclusiones(libro, ctx)
 
     return guardar_conservando_formato(libro, plantilla, Path(destino))
+
+
+def _depositar_cruce_universal(libro, ctx, total_confirmado) -> None:
+    """El unico cruce que corre en cualquier municipio: declarado vs auxiliar.
+
+    Es lo que Robinson hace a mano al final -- confirmar que la suma de la
+    2368 en el auxiliar del cliente iguala lo que el borrador declaro. Si la
+    estructura del formulario cambia (San Alberto, Barranquilla, cualquier
+    municipio nuevo), este cruce sigue funcionando porque solo depende de
+    dos numeros. Se escribe abajo de REVISION ICA, en una fila libre.
+
+    Sin total confirmado no hay cruce: no vamos a inventarlo desde el PDF a
+    ciegas. D9 pide que la cifra la ponga el auditor.
+    """
+    if total_confirmado is None:
+        return
+
+    hoja = libro["REVISION ICA"]
+    fila = _fila_libre(hoja, desde=32)
+
+    # Total del auxiliar: la suma que ya calcula el pipeline. Se toma en
+    # valor absoluto porque las retenciones se registran como credito
+    # (negativas en Agroingenium, positivas en TERLICA).
+    total_auxiliar = abs(ctx.total_auxiliar or Decimal("0"))
+    total_conf = Decimal(str(total_confirmado))
+    diferencia = total_conf - total_auxiliar
+
+    hoja.cell(row=fila, column=2, value="CRUCE UNIVERSAL")
+    hoja.cell(row=fila, column=3,
+              value="Declarado (auditor confirmo) vs auxiliar 2368")
+
+    hoja.cell(row=fila + 1, column=2, value="Declarado")
+    hoja.cell(row=fila + 1, column=4, value=int(total_conf))
+
+    hoja.cell(row=fila + 2, column=2, value="Auxiliar 2368")
+    hoja.cell(row=fila + 2, column=4, value=int(total_auxiliar))
+
+    hoja.cell(row=fila + 3, column=2, value="Diferencia")
+    hoja.cell(row=fila + 3, column=4, value=int(diferencia))
+    # El estado se DICE, no se usa un semaforo: los redondeos a miles del
+    # formulario producen diferencias legitimas de hasta unos cientos.
+    if abs(diferencia) <= 1000:
+        veredicto = "CUADRA (diferencia dentro del redondeo del formulario)"
+    else:
+        veredicto = "NO CUADRA -- revisar por que"
+    hoja.cell(row=fila + 3, column=5, value=veredicto)
+
+
+def _fila_libre(hoja, desde: int) -> int:
+    """La primera fila totalmente vacia desde `desde`, dentro del rango util."""
+    for fila in range(desde, hoja.max_row + 10):
+        if all(hoja.cell(row=fila, column=c).value in (None, "")
+               for c in range(2, 11)):
+            return fila
+    return desde

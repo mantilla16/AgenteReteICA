@@ -648,16 +648,85 @@ function pintarTablero(data, subiendoAhora){
   const choque = (tablero.conflictos || []).length
     ? avisoError(tablero.conflictos.join("; ")) : "";
 
-  caja.innerHTML = filas + pendiente + sobran + choque;
+  caja.innerHTML = filas + pendiente + sobran + choque + tarjetaBorrador(tablero);
   caja.querySelectorAll("[data-quitar]").forEach(a => {
     a.onclick = e => { e.preventDefault(); quitarDocumento(a.dataset.quitar); };
   });
+  // Los candidatos alternativos -- si el motor propuso el total equivocado,
+  // el auditor los ve todos y elige con un clic en vez de teclear.
+  caja.querySelectorAll("[data-tot]").forEach(a => {
+    a.onclick = e => {
+      e.preventDefault();
+      const input = $("#total-confirmado");
+      if(input) input.value = Number(a.dataset.tot).toLocaleString("es-CO");
+    };
+  });
+  // Si venia NIT/municipio/periodo con confianza alta, se autocompletan los
+  // campos del encargo. El auditor los puede editar si el motor se equivoco.
+  const b = tablero.lectura_borrador || {};
+  if(b.nit && b.nit_confianza === "alta" && !$("#nit").value) $("#nit").value = b.nit;
+  if(b.periodo && b.periodo_confianza !== "vacio" && !$("#periodo").value) $("#periodo").value = b.periodo;
 
   const boton = $("#run");
   boton.disabled = !tablero.puede_revisar || subiendo > 0;
   boton.textContent = tablero.controles_en_riesgo && tablero.controles_en_riesgo.length
     ? "Revisar igual (sin " + tablero.controles_en_riesgo.join(", ") + ")"
     : "Revisar y generar papel";
+}
+
+/* Lo que el motor leyo del borrador. El auditor CONFIRMA antes de correr:
+   con formatos de distintos municipios la extraccion puede leer un dato mal
+   sin darse cuenta, y una cifra invento en el papel es peor que ninguna. */
+
+const CONFIANZAS = {
+  alta:  {color: "var(--verde)",  simbolo: "✓"},
+  media: {color: "var(--ambar)",  simbolo: "?"},
+  baja:  {color: "var(--rojo)",   simbolo: "?!"},
+  vacio: {color: "var(--tinta-suave)", simbolo: "—"},
+};
+
+function chipConfianza(c){
+  const conf = CONFIANZAS[c] || CONFIANZAS.vacio;
+  return `<span title="confianza: ${c}" style="color:${conf.color};font-weight:600;
+    font-size:12px;margin-left:6px">${conf.simbolo}</span>`;
+}
+
+function tarjetaBorrador(t){
+  const b = t.lectura_borrador || {};
+  if(!t.insumos.borrador) return "";  // sin borrador, no hay tarjeta
+  if(b.error) return `<div class="aviso alerta" style="display:block;margin-top:12px"><div class="cuerpo">
+      No se pudo leer el borrador: ${b.error}. Puede seguir; el papel saldra sin cruce.
+    </div></div>`;
+
+  const total = (b.total_declarado != null)
+    ? Number(b.total_declarado).toLocaleString("es-CO") : "";
+  return `<div class="panel" style="margin-top:14px">
+    <div class="rotulo" style="margin-bottom:10px">Lo que lei del borrador
+      <span style="opacity:.7;font-weight:400;font-size:12px">— confirme antes de correr</span></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 18px;font-size:13px">
+      <div>Municipio ${chipConfianza(b.municipio_confianza)}<br>
+        <b>${b.municipio || "(no detectado)"}</b></div>
+      <div>NIT ${chipConfianza(b.nit_confianza)}<br>
+        <b class="cifra">${b.nit || "(no detectado)"}</b></div>
+      <div>Periodo ${chipConfianza(b.periodo_confianza)}<br>
+        <b class="cifra">${b.periodo || "(no detectado)"}</b></div>
+      <div>Total declarado ${chipConfianza(b.total_confianza)}<br>
+        <input id="total-confirmado" class="cifra" type="text"
+               value="${total}" placeholder="Escriba el total del borrador"
+               style="width:100%;padding:4px 6px;font-size:15px;font-weight:600">
+      </div>
+    </div>
+    ${b.candidatos_total && b.candidatos_total.length > 1 ? `
+      <div style="font-size:12px;color:var(--tinta-suave);margin-top:10px">
+        Otros candidatos que vi en el PDF:
+        ${b.candidatos_total.map(c => `<a href="#" data-tot="${c}"
+          style="color:var(--tinta-media);text-decoration:underline;margin-right:8px">${
+          Number(c).toLocaleString("es-CO")}</a>`).join("")}
+      </div>` : ""}
+    <div style="font-size:11px;color:var(--tinta-suave);margin-top:8px">
+      El total que quede aqui es el que el motor comparara con el auxiliar 2368.
+    </div>
+  </div>`;
 }
 
 /* Los controles que dependen de cada insumo. Espejo del servidor, solo para
@@ -773,6 +842,13 @@ $("#run").onclick = async () => {
   fd.append("periodo", $("#periodo").value);
   fd.append("municipio", $("#municipio").value);
   fd.append("declarado_por", $("#declarado_por").value);
+  // El total que el auditor confirmo en la tarjeta del borrador. Se manda
+  // tal cual --con puntos incluidos-- porque _confirmar_total() del servidor
+  // limpia todo lo que no sea digito.
+  const totalInput = $("#total-confirmado");
+  if(totalInput && totalInput.value.trim()) {
+    fd.append("total_confirmado", totalInput.value);
+  }
   // La Revision Inteligente usa el modelo local del servidor: no hay clave
   // que pedirle al auditor.
   $("#run").disabled = true; $("#run").textContent = "Procesando…";
