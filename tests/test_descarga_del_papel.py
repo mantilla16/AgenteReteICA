@@ -21,11 +21,9 @@ from motor_reteica.api import servidor
 @pytest.fixture
 def corrida(tmp_path, monkeypatch):
     """Un papel en disco, como lo deja depositar()."""
-    monkeypatch.setattr(servidor, "_RAIZ", tmp_path)
+    monkeypatch.setattr(servidor, "_PAPELES", tmp_path)
     corr = "fe44a79fdda6"
-    carpeta = tmp_path / corr
-    carpeta.mkdir()
-    papel = carpeta / ("PT_ReteICA_%s.xlsx" % corr)
+    papel = tmp_path / ("%s.xlsx" % corr)
     papel.write_bytes(b"PK\x03\x04 no importa el contenido")
     return corr, papel
 
@@ -55,11 +53,8 @@ def test_un_id_que_no_es_una_corrida_no_toca_el_disco(id_torcido, corrida):
     assert servidor._ruta_papel(id_torcido) is None
 
 
-def test_no_sirve_otro_archivo_de_la_misma_carpeta(tmp_path, monkeypatch):
+def test_no_sirve_otro_archivo_del_deposito(tmp_path, monkeypatch):
     """Solo el papel de esa corrida, no cualquier cosa que quede ahi."""
-    monkeypatch.setattr(servidor, "_RAIZ", tmp_path)
-    corr = "0123456789ab"
-    carpeta = tmp_path / corr
-    carpeta.mkdir()
-    (carpeta / "auxiliar_del_cliente.xlsx").write_bytes(b"datos del cliente")
-    assert servidor._ruta_papel(corr) is None
+    monkeypatch.setattr(servidor, "_PAPELES", tmp_path)
+    (tmp_path / "auxiliar_del_cliente.xlsx").write_bytes(b"datos del cliente")
+    assert servidor._ruta_papel("0123456789ab") is None

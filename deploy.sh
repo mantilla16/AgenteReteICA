@@ -21,6 +21,9 @@ fi
 echo "Creando directorios..."
 sudo mkdir -p $APP_DIR
 sudo mkdir -p $LOG_DIR
+# Los papeles de trabajo. NO en /tmp: el sistema lo limpia solo y lo borra al
+# reiniciar, y el historial quedaria apuntando a archivos que ya no estan.
+sudo mkdir -p /var/lib/reteica/papeles
 
 # 3. Copiar archivos del proyecto
 echo "Copiando archivos del proyecto..."
@@ -36,6 +39,7 @@ sudo $APP_DIR/venv/bin/pip install -r $APP_DIR/requirements.txt
 echo "Configurando permisos..."
 sudo chown -R $APP_USER:$APP_USER $APP_DIR
 sudo chown -R $APP_USER:$APP_USER $LOG_DIR
+sudo chown -R $APP_USER:$APP_USER /var/lib/reteica
 
 # 6. Archivo de credenciales (fuera del repo: nunca se versiona)
 if [ ! -f /etc/reteica.env ]; then
@@ -71,11 +75,13 @@ set +e
 . /etc/reteica.env 2>/dev/null
 if [ -n "$AUDITORIA_DSN" ] && command -v psql >/dev/null 2>&1; then
     sudo -u postgres psql "$AUDITORIA_DSN" -f $APP_DIR/schema_auth.sql \
-        && echo "  schema aplicado." \
+        && sudo -u postgres psql "$AUDITORIA_DSN" -f $APP_DIR/schema_revisiones.sql \
+        && echo "  schemas aplicados." \
         || echo "  !! No se pudo aplicar el schema. Revise AUDITORIA_DSN en /etc/reteica.env"
 else
     echo "  !! Omitido (falta psql o AUDITORIA_DSN). Aplicar a mano:"
     echo "     psql \"\$AUDITORIA_DSN\" -f $APP_DIR/schema_auth.sql"
+    echo "     psql \"\$AUDITORIA_DSN\" -f $APP_DIR/schema_revisiones.sql"
 fi
 set -e
 

@@ -159,3 +159,70 @@ def sumar_intento(codigo_id: int) -> int:
 def consumir_codigo(codigo_id: int) -> None:
     ejecutar("UPDATE core.codigo_acceso SET usado_en=now() WHERE id=%s",
              (codigo_id,))
+
+
+# =====================================================================
+# REVISIONES
+# =====================================================================
+#
+# La visibilidad es por auditor: cada consulta lleva usuario_id en el WHERE,
+# no se filtra despues en Python. Una revision de ReteICA lleva cifras de un
+# cliente concreto, y el que no es su dueno no la debe recibir ni de paso.
+
+def guardar_revision(corrida: str, usuario_id: str, nit: str,
+                     razon_social: str | None, periodo: str, municipio: str,
+                     declarado_por: str | None, resumen: dict,
+                     ruta_papel: str) -> None:
+    semaforo = (resumen.get("semaforo") or {}).get("color")
+    ejecutar(
+        """INSERT INTO reteica.revision
+             (corrida, usuario_id, nit, razon_social, periodo, municipio,
+              declarado_por, semaforo, conclusion, impacto_total,
+              puede_concluir_limpio, resumen, ruta_papel)
+           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+        (corrida, usuario_id, nit, razon_social, periodo, municipio,
+         declarado_por, semaforo, resumen.get("conclusion"),
+         resumen.get("impacto_total"), resumen.get("puede_concluir_limpio"),
+         json.dumps(resumen, default=str), ruta_papel),
+    )
+
+
+def revisiones_de(usuario_id: str, nit: str | None = None,
+                  limite: int = 100) -> list[dict]:
+    """La lista para el historial. Sin el resumen: pesa y no se muestra ahi."""
+    if nit:
+        return varios(
+            """SELECT corrida, nit, razon_social, periodo, municipio,
+                      declarado_por, creado_en, semaforo, impacto_total,
+                      puede_concluir_limpio
+                 FROM reteica.revision
+                WHERE usuario_id=%s AND nit=%s
+                ORDER BY creado_en DESC LIMIT %s""",
+            (usuario_id, nit, limite))
+    return varios(
+        """SELECT corrida, nit, razon_social, periodo, municipio,
+                  declarado_por, creado_en, semaforo, impacto_total,
+                  puede_concluir_limpio
+             FROM reteica.revision
+            WHERE usuario_id=%s
+            ORDER BY creado_en DESC LIMIT %s""",
+        (usuario_id, limite))
+
+
+def revision_de(corrida: str, usuario_id: str) -> dict | None:
+    """Una revision, solo si es de quien la pide. None tambien si no es suya."""
+    return uno(
+        """SELECT * FROM reteica.revision
+            WHERE corrida=%s AND usuario_id=%s""",
+        (corrida, usuario_id))
+
+
+def clientes_de(usuario_id: str) -> list[dict]:
+    """Los NIT que este auditor ya ha revisado, para el filtro del historial."""
+    return varios(
+        """SELECT nit, max(razon_social) AS razon_social,
+                  count(*) AS revisiones, max(creado_en) AS ultima
+             FROM reteica.revision
+            WHERE usuario_id=%s
+            GROUP BY nit ORDER BY max(creado_en) DESC""",
+        (usuario_id,))

@@ -54,9 +54,20 @@ _RAIZ = Path(tempfile.gettempdir()) / "motor_reteica_web"
 _RAIZ.mkdir(exist_ok=True)
 _WEB = ruta_recurso("web")
 
+# Los papeles NO pueden vivir en /tmp: el sistema lo limpia solo y lo borra al
+# reiniciar, y el historial quedaria lleno de filas apuntando a archivos que ya
+# no estan. _RAIZ sigue siendo el area de trabajo de una corrida (los documentos
+# que sube el auditor, que se descartan al terminar); esto es el archivo.
+_PAPELES = Path(os.getenv("RETEICA_PAPELES", "/var/lib/reteica/papeles"))
+
 # La corrida es uuid4().hex[:12]. Se valida antes de tocar el disco: el id
 # viaja en la URL y sin esto un ../.. serviria cualquier archivo del servidor.
 _RE_CORRIDA = re.compile(r"^[0-9a-f]{12}$")
+
+
+def _deposito_papeles() -> Path:
+    _PAPELES.mkdir(parents=True, exist_ok=True)
+    return _PAPELES
 
 
 def _ruta_papel(corr: str) -> Path | None:
@@ -70,7 +81,7 @@ def _ruta_papel(corr: str) -> Path | None:
     """
     if not _RE_CORRIDA.match(corr or ""):
         return None
-    ruta = _RAIZ / corr / ("PT_ReteICA_%s.xlsx" % corr)
+    ruta = _PAPELES / ("%s.xlsx" % corr)
     return ruta if ruta.exists() else None
 
 
@@ -374,6 +385,7 @@ def _resumen(ctx) -> dict:
 
 @app.post("/analizar")
 async def analizar(
+    request: Request,
     archivos: list[UploadFile] = File(...),
     nit: str = Form(...), periodo: str = Form(...),
     municipio: str = Form("santa_marta"),
@@ -424,12 +436,79 @@ async def analizar(
             AtestacionInvalida, FileNotFoundError) as error:
         raise HTTPException(400, str(error))
 
-    salida = carpeta / ("PT_ReteICA_%s.xlsx" % corr)
+    # El papel va al archivo permanente; el area de trabajo se descarta con
+    # todo lo que el auditor subio. Se guarda el papel, no la evidencia cruda:
+    # son cifras de clientes y no hay razon para acumularlas en el servidor.
+    salida = _deposito_papeles() / ("%s.xlsx" % corr)
     depositar(ctx, salida)
+    shutil.rmtree(carpeta, ignore_errors=True)
 
     resumen = _resumen(ctx)
     resumen["sin_clasificar"] = sin_clasificar
-    return {"corrida": corr, "descarga": "/descargar/%s" % corr, "resumen": resumen}
+
+    # El registro no puede tumbar una revision que ya se hizo: si la base
+    # falla, el auditor igual recibe su papel y la respuesta lo dice, en vez
+    # de perder diez minutos de trabajo por una fila que no se escribio.
+    registrada = True
+    try:
+        usuario = request.state.usuario
+        db.guardar_revision(
+            corrida=corr, usuario_id=usuario["id"], nit=nit,
+            razon_social=resumen.get("razon_social"), periodo=periodo,
+            municipio=MUNICIPIOS[municipio].nombre,
+            declarado_por=declarado_por or None, resumen=resumen,
+            ruta_papel=str(salida))
+    except Exception as error:
+        registrada = False
+        print("[revision] no se pudo registrar %s: %s" % (corr, error),
+              flush=True)
+
+    return {"corrida": corr, "descarga": "/descargar/%s" % corr,
+            "resumen": resumen, "registrada": registrada}
+
+
+# --------------------------------------------------------------------------
+# Historial: cada auditor ve lo suyo
+# --------------------------------------------------------------------------
+
+@app.get("/revisiones")
+def listar_revisiones(request: Request, nit: str = "") -> dict:
+    usuario = request.state.usuario
+    filas = db.revisiones_de(usuario["id"], nit=nit or None)
+    return {"revisiones": [_fila_json(f) for f in filas]}
+
+
+@app.get("/clientes")
+def listar_clientes(request: Request) -> dict:
+    usuario = request.state.usuario
+    return {"clientes": [_fila_json(f) for f in db.clientes_de(usuario["id"])]}
+
+
+@app.get("/revisiones/{corr}")
+def ver_revision(corr: str, request: Request) -> dict:
+    usuario = request.state.usuario
+    fila = db.revision_de(corr, usuario["id"])
+    if fila is None:
+        raise HTTPException(404, "Esa revision no existe o no es suya.")
+    datos = _fila_json(fila)
+    datos["descarga"] = "/descargar/%s" % corr
+    datos["papel_disponible"] = _ruta_papel(corr) is not None
+    return datos
+
+
+def _fila_json(fila: dict) -> dict:
+    """Las filas traen datetime, Decimal y uuid: nada de eso es JSON."""
+    salida = {}
+    for clave, valor in fila.items():
+        if clave == "usuario_id":
+            continue          # de adentro para afuera no se publica
+        if isinstance(valor, datetime):
+            salida[clave] = valor.isoformat()
+        elif isinstance(valor, Decimal):
+            salida[clave] = float(valor)
+        else:
+            salida[clave] = valor
+    return salida
 
 
 @app.get("/salir")
@@ -442,9 +521,17 @@ def salir(request: Request, response: Response) -> dict:
 
 
 @app.get("/descargar/{corr}")
-def descargar(corr: str):
+def descargar(corr: str, request: Request):
+    # El papel es del auditor que lo genero. Se pregunta a la base ANTES de
+    # mirar el disco: que el archivo exista no autoriza a nadie a recibirlo.
+    fila = db.revision_de(corr, request.state.usuario["id"])
+    if fila is None:
+        raise HTTPException(404, "Papel no encontrado o expirado.")
     ruta = _ruta_papel(corr)
     if ruta is None:
         raise HTTPException(404, "Papel no encontrado o expirado.")
-    return FileResponse(str(ruta), filename=ruta.name,
+    # Un nombre que el auditor pueda archivar, no el id de la corrida.
+    nombre = "PT_ReteICA_%s_%s.xlsx" % (fila["nit"],
+                                        str(fila["periodo"]).replace("-", ""))
+    return FileResponse(str(ruta), filename=nombre,
                         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")

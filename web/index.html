@@ -362,6 +362,24 @@ a.dl { display: inline-block; margin-top: 10px; text-decoration: none; }
         <div id="msg"></div>
       </div>
     </section>
+
+    <!-- Las revisiones que ya hizo este auditor. Cada quien ve las suyas:
+         una revision lleva cifras de un cliente concreto. Un reproceso del
+         mismo NIT y periodo NO reemplaza al anterior -- en auditoria importa
+         poder ver que algo se rehizo, y cuando. -->
+    <section class="seccion">
+      <div class="seccion-cab"><span class="n">3</span><h2>Revisiones anteriores</h2></div>
+      <div class="panel">
+        <div style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap">
+          <div style="min-width:260px; flex:1">
+            <label>Cliente</label>
+            <select id="filtro-cliente"><option value="">Todos los clientes</option></select>
+          </div>
+          <button id="recargar" class="btn btn-contorno">Actualizar</button>
+        </div>
+        <div id="historial" style="margin-top:16px"></div>
+      </div>
+    </section>
   </div>
 
   <!-- ================================================ YA HAY RESULTADO
@@ -579,6 +597,13 @@ $("#run").onclick = async () => {
     const data = await leerRespuesta(r);
     if(!r.ok){ msg.innerHTML = `<div class="aviso error" style="margin-top:12px"><div class="cuerpo">${data.detail||"Error"}</div></div>`; return; }
     pintar(data);
+    // El papel esta hecho y se puede descargar; lo que fallo es la fila del
+    // historial. Se dice, porque si no, manana esa revision no aparece y
+    // nadie sabe por que.
+    if(data.registrada === false){
+      $("#msg").innerHTML = `<div class="aviso alerta" style="margin-top:12px"><div class="cuerpo">La revision se genero y puede descargarla, pero no quedo registrada en el historial.</div></div>`;
+    }
+    cargarClientes(); cargarHistorial();
   } catch(e){ msg.innerHTML = `<div class="aviso error" style="margin-top:12px"><div class="cuerpo">${e}</div></div>`; }
   finally { $("#run").disabled = false; $("#run").textContent = "Revisar y generar papel"; }
 };
@@ -681,6 +706,100 @@ function pintar(data){
 
   mostrarHoja("resumen");
 }
+
+
+// ==================================================== HISTORIAL
+// El servidor solo devuelve las revisiones del auditor que pregunta: el
+// filtro va en el WHERE, no aqui. Esta pantalla solo las dibuja.
+
+const SEMAFORO_PUNTO = { ROJO: "#c0392b", AMARILLO: "#c47f17", VERDE: "#1e8449" };
+
+function fecha(iso){
+  if(!iso) return "—";
+  const d = new Date(iso);
+  return d.toLocaleString("es-CO", {year:"numeric", month:"2-digit",
+    day:"2-digit", hour:"2-digit", minute:"2-digit"});
+}
+
+async function cargarHistorial(){
+  const caja = $("#historial");
+  const nit = $("#filtro-cliente").value;
+  caja.innerHTML = `<div class="rotulo">Cargando…</div>`;
+  try {
+    const r = await fetch(BASE + "/revisiones" + (nit ? "?nit=" + encodeURIComponent(nit) : ""));
+    const data = await leerRespuesta(r);
+    if(!r.ok){ caja.innerHTML = `<div class="aviso error"><div class="cuerpo">${data.detail||"No se pudo leer el historial"}</div></div>`; return; }
+
+    if(!data.revisiones.length){
+      caja.innerHTML = `<div class="rotulo">${nit
+        ? "Ese cliente no tiene revisiones registradas."
+        : "Todavia no ha revisado ningun encargo. El primero que genere quedara aqui."}</div>`;
+      return;
+    }
+
+    caja.innerHTML = `<table class="tabla"><thead><tr>
+        <th></th><th>Cliente</th><th>NIT</th><th>Periodo</th>
+        <th>Revisada</th><th style="text-align:right">Impacto</th><th></th>
+      </tr></thead><tbody>${data.revisiones.map(v => `
+        <tr>
+          <td><span title="${v.semaforo||""}" style="display:inline-block;width:9px;height:9px;
+              border-radius:50%;background:${SEMAFORO_PUNTO[v.semaforo]||"#9aa0a6"}"></span></td>
+          <td>${v.razon_social || "—"}</td>
+          <td class="cifra">${v.nit}</td>
+          <td class="cifra">${v.periodo}</td>
+          <td>${fecha(v.creado_en)}</td>
+          <td class="cifra" style="text-align:right">${
+            v.impacto_total == null ? "—"
+            : Number(v.impacto_total).toLocaleString("es-CO")}</td>
+          <td><button class="btn btn-contorno abrir" data-corrida="${v.corrida}">Abrir</button></td>
+        </tr>`).join("")}</tbody></table>`;
+
+    caja.querySelectorAll(".abrir").forEach(b => {
+      b.onclick = () => abrirRevision(b.dataset.corrida);
+    });
+  } catch(e){
+    caja.innerHTML = `<div class="aviso error"><div class="cuerpo">${e}</div></div>`;
+  }
+}
+
+async function abrirRevision(corrida){
+  const r = await fetch(BASE + "/revisiones/" + corrida);
+  const data = await leerRespuesta(r);
+  if(!r.ok){
+    $("#msg").innerHTML = `<div class="aviso error" style="margin-top:12px"><div class="cuerpo">${data.detail||"No se pudo abrir"}</div></div>`;
+    return;
+  }
+  // pintar() lee el encargo del formulario, asi que se rellena con lo que
+  // quedo guardado: el riel tiene que describir la revision que se abre, no
+  // la que el auditor estaba por lanzar.
+  $("#nit").value = data.nit || "";
+  $("#periodo").value = data.periodo || "";
+  $("#declarado_por").value = data.declarado_por || "";
+  pintar({resumen: data.resumen, descarga: data.descarga, corrida: data.corrida});
+  if(!data.papel_disponible){
+    $("#msg").innerHTML = `<div class="aviso alerta" style="margin-top:12px"><div class="cuerpo">El registro existe pero el archivo del papel ya no esta en el servidor.</div></div>`;
+  }
+}
+
+async function cargarClientes(){
+  try {
+    const r = await fetch(BASE + "/clientes");
+    const data = await leerRespuesta(r);
+    if(!r.ok) return;
+    const sel = $("#filtro-cliente");
+    const elegido = sel.value;
+    sel.innerHTML = `<option value="">Todos los clientes</option>` +
+      data.clientes.map(c => `<option value="${c.nit}">${
+        (c.razon_social || c.nit)} · ${c.revisiones} revision(es)</option>`).join("");
+    sel.value = elegido;
+  } catch(e){ /* el historial se puede usar sin el filtro */ }
+}
+
+$("#filtro-cliente").onchange = cargarHistorial;
+$("#recargar").onclick = () => { cargarClientes(); cargarHistorial(); };
+
+cargarClientes();
+cargarHistorial();
 </script>
 </body>
 </html>
