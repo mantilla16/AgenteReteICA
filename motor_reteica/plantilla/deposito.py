@@ -465,7 +465,13 @@ def _depositar_revision_ica(libro, ctx) -> None:
     # El saldo que el motor ya leyo del balance. Si la cuenta no esta, se
     # DICE; antes el VLOOKUP daba #N/A, que era ruidoso a proposito, y un
     # cero mudo en su lugar seria justo lo que este proyecto no acepta.
+    # El balance es opcional: si no se aporto, ctx.saldos es None y C2 queda
+    # NO_EJECUTADO. El papel tiene que decir eso mismo en la celda, por la
+    # razon de arriba: callarlo con un cero seria peor que no escribir nada.
     for celda, cuenta in (("N12", "2368010007"), ("N13", "2368010010")):
+        if ctx.saldos is None:
+            hoja[celda] = "NO SE APORTO EL BALANCE DE PRUEBA"
+            continue
         saldo = ctx.saldos.get(cuenta)
         hoja[celda] = (int(saldo) if saldo is not None
                        else "NO ESTA EN EL BALANCE: %s" % cuenta)
