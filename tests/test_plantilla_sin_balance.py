@@ -59,14 +59,24 @@ def test_el_papel_se_escribe_sin_balance(papel):
     assert "REVISION ICA" in papel.sheetnames
 
 
-def test_la_celda_dice_que_falta_el_balance_en_vez_de_callarlo(papel):
+def test_la_celda_numerica_queda_vacia_no_con_texto(papel):
+    """El texto ahi rompia la hoja entera.
+
+    O12 hace =ROUND(+N12-M12,-3) y N14 suma N12:N13. Una cadena en N12
+    --por explicativa que fuera-- daba #!VALOR! y el error se propagaba a
+    todo el papel. Vacia no afirma nada; un cero si afirmaria un saldo.
+    """
     hoja = papel["REVISION ICA"]
     for celda in ("N12", "N13"):
-        valor = hoja[celda].value
-        assert isinstance(valor, str), (
-            "%s trae %r: un numero ahi afirma un saldo que nadie aporto"
-            % (celda, valor))
-        assert "BALANCE" in valor.upper()
+        assert hoja[celda].value is None, (
+            "%s trae %r: cualquier texto ahi revienta las formulas"
+            % (celda, hoja[celda].value))
+
+
+def test_la_falta_se_dice_en_una_columna_que_nadie_calcula(papel):
+    """Pero no se calla: se declara donde no puede romper nada."""
+    aviso = papel["REVISION ICA"]["P12"].value
+    assert aviso and "BALANCE" in aviso.upper()
 
 
 def test_con_balance_la_celda_sigue_trayendo_el_saldo(tmp_path_factory):

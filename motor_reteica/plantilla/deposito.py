@@ -465,16 +465,24 @@ def _depositar_revision_ica(libro, ctx) -> None:
     # El saldo que el motor ya leyo del balance. Si la cuenta no esta, se
     # DICE; antes el VLOOKUP daba #N/A, que era ruidoso a proposito, y un
     # cero mudo en su lugar seria justo lo que este proyecto no acepta.
-    # El balance es opcional: si no se aporto, ctx.saldos es None y C2 queda
-    # NO_EJECUTADO. El papel tiene que decir eso mismo en la celda, por la
-    # razon de arriba: callarlo con un cero seria peor que no escribir nada.
+    # N12 y N13 son celdas NUMERICAS: O12 hace =ROUND(+N12-M12,-3) y N14 las
+    # suma. Escribir texto ahi --por bienintencionado que sea-- produce
+    # #!VALOR! y el error se propaga por toda la hoja. La falta se DICE, pero
+    # en P, que es columna libre y nadie calcula sobre ella; la celda numerica
+    # queda VACIA, que en Excel no afirma un saldo de cero.
+    faltantes = []
     for celda, cuenta in (("N12", "2368010007"), ("N13", "2368010010")):
-        if ctx.saldos is None:
-            hoja[celda] = "NO SE APORTO EL BALANCE DE PRUEBA"
-            continue
-        saldo = ctx.saldos.get(cuenta)
-        hoja[celda] = (int(saldo) if saldo is not None
-                       else "NO ESTA EN EL BALANCE: %s" % cuenta)
+        saldo = None if ctx.saldos is None else ctx.saldos.get(cuenta)
+        if saldo is None:
+            hoja[celda] = None
+            faltantes.append(cuenta)
+        else:
+            hoja[celda] = int(saldo)
+
+    if faltantes:
+        hoja["P12"] = ("SIN BALANCE DE PRUEBA: no se pudo tomar el saldo"
+                       if ctx.saldos is None else
+                       "NO ESTA EN EL BALANCE: %s" % ", ".join(faltantes))
 
     # Lo declarado: se suman TODAS las actividades del borrador, no la celda
     # del total de la hoja. Si el borrador trae siete actividades en vez de
