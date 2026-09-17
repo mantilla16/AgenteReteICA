@@ -96,6 +96,21 @@ def _json_o_vacio(texto):
     return crudo if isinstance(crudo, list) else None
 
 
+def _no_entendio(crudo) -> bool:
+    """El modelo contesto una lista, pero ninguna entrada es interpretable.
+
+    D7 dejaba NO_EJECUTADO el caso "no se pudo llamar al modelo". Falta este
+    otro: el modelo contesto algo que resulta ser un arreglo JSON, pero no
+    trae un solo objeto que se pueda leer -- por ejemplo ["[]"], que es lo que
+    devuelven los modelos pequenos cuando no entienden la instruccion. Sin
+    esta guarda, todas las entradas se descartan en silencio, quedan cero
+    excepciones y el control concluye OK: un OK que nadie puede distinguir de
+    una revision de verdad. Un [] vacio SI es respuesta legitima (no encontro
+    nada) y por eso no entra aqui.
+    """
+    return bool(crudo) and not any(isinstance(e, dict) for e in crudo)
+
+
 # --------------------------------------------------------------------------
 # IA-1
 # --------------------------------------------------------------------------
@@ -139,7 +154,13 @@ def ia1_plausibilidad(reconstruccion, borrador, municipio, cliente=None,
     if crudo is None:
         return _no_ejecutado("IA-1", nombre,
                              "el modelo no devolvio un arreglo JSON valido")
+    if _no_entendio(crudo):
+        return _no_ejecutado(
+            "IA-1", nombre,
+            "el modelo devolvio %d entrada(s) pero ninguna interpretable"
+            % len(crudo))
 
+    descartadas = sum(1 for e in crudo if not isinstance(e, dict))
     excepciones = []
     for entrada in crudo:
         if not isinstance(entrada, dict) or not entrada.get("contradice"):
@@ -181,6 +202,11 @@ def ia1_plausibilidad(reconstruccion, borrador, municipio, cliente=None,
                "no encontro ninguna, NO que la clasificacion sea correcta: el "
                "reparto se sigue tomando del borrador."
                % (len(lineas), respuesta.modelo))
+    if descartadas:
+        # El papel dice lo que de verdad paso: parte de lo que contesto el
+        # modelo no se pudo leer.
+        detalle += (" AVISO: %d entrada(s) de la respuesta se descartaron por "
+                    "no ser interpretables." % descartadas)
 
     return ResultadoControl(
         codigo="IA-1", nombre=nombre,
@@ -213,7 +239,13 @@ def ia3_consistencia(resultados, informe, cliente=None) -> ResultadoControl:
     if crudo is None:
         return _no_ejecutado("IA-3", nombre,
                              "el modelo no devolvio un arreglo JSON valido")
+    if _no_entendio(crudo):
+        return _no_ejecutado(
+            "IA-3", nombre,
+            "el modelo devolvio %d entrada(s) pero ninguna interpretable"
+            % len(crudo))
 
+    descartadas = sum(1 for e in crudo if not isinstance(e, dict))
     excepciones = []
     for entrada in crudo:
         if not isinstance(entrada, dict):
@@ -230,6 +262,9 @@ def ia3_consistencia(resultados, informe, cliente=None) -> ResultadoControl:
 
     detalle = ("revisado por %s; la IA no modifica cifras ni estados de "
                "control" % respuesta.modelo)
+    if descartadas:
+        detalle += (" AVISO: %d entrada(s) de la respuesta se descartaron por "
+                    "no ser interpretables." % descartadas)
     return ResultadoControl(
         codigo="IA-3", nombre=nombre,
         estado=Estado.FALLA if excepciones else Estado.OK,

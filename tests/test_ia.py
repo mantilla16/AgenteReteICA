@@ -339,3 +339,49 @@ def test_si_el_modelo_local_no_responde_es_no_ejecutado_no_ok(recon,
                                   cliente=ClienteIA())
     assert resultado.estado is Estado.NO_EJECUTADO
     assert resultado.estado is not Estado.OK
+
+
+# --------------------------------------------------------------------------
+# Un arreglo JSON de basura no puede pasar por revision hecha
+# --------------------------------------------------------------------------
+
+def test_una_lista_sin_objetos_es_no_ejecutado_no_ok(recon):
+    """Lo que devolvio qwen2.5:3b de verdad: ["[]"].
+
+    Es un arreglo JSON valido, asi que pasa el primer filtro, pero no trae un
+    solo objeto legible. Sin guarda, todas las entradas se descartan en
+    silencio y el control concluye OK: un OK que en el papel es identico al de
+    una revision de verdad.
+    """
+    reconstruccion, borrador = recon
+    resultado = ia1_plausibilidad(reconstruccion, borrador, MUNICIPIO,
+                                  cliente=ClienteFalso(texto='["[]"]'))
+    assert resultado.estado is Estado.NO_EJECUTADO
+    assert resultado.estado is not Estado.OK
+
+
+def test_un_arreglo_vacio_si_es_respuesta_legitima(recon):
+    """[] significa 'no encontre contradicciones'. Eso si es OK."""
+    reconstruccion, borrador = recon
+    resultado = ia1_plausibilidad(reconstruccion, borrador, MUNICIPIO,
+                                  cliente=ClienteFalso(texto="[]"))
+    assert resultado.estado is Estado.OK
+
+
+def test_el_papel_avisa_cuando_descarta_parte_de_la_respuesta(recon):
+    """Si algo se descarto, el papel lo dice. No se calla lo que no entendio."""
+    reconstruccion, borrador = recon
+    mezcla = '[{"linea":"L1","contradice":false}, "basura", 42]'
+    resultado = ia1_plausibilidad(reconstruccion, borrador, MUNICIPIO,
+                                  cliente=ClienteFalso(texto=mezcla))
+    assert resultado.estado is Estado.OK
+    assert "2 entrada(s)" in resultado.detalle
+    assert "descartaron" in resultado.detalle
+
+
+def test_ia3_tampoco_acepta_una_lista_de_basura():
+    ctx = revisar(BASE, nit="819002433", periodo="2026-07",
+                  municipio=MUNICIPIO)
+    resultado = ia3_consistencia(ctx.resultados, ctx.informe,
+                                 cliente=ClienteFalso(texto='["[]"]'))
+    assert resultado.estado is Estado.NO_EJECUTADO
