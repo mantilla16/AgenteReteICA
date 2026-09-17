@@ -265,6 +265,21 @@ def revision_de(corrida: str, usuario_id: str) -> dict | None:
         (corrida, usuario_id))
 
 
+def borrar_revision(corrida: str, usuario_id: str) -> bool:
+    """Borra una revision si es del auditor que la pide.
+
+    Devuelve True si borro algo, False si no existia o no era suya. La
+    autorizacion va en el WHERE, igual que las lecturas: no basta con saber
+    el id de la corrida, tiene que ser del dueno.
+    """
+    with conn() as c:
+        cur = c.execute(
+            "DELETE FROM reteica.revision WHERE corrida=%s AND usuario_id=%s",
+            (corrida, usuario_id))
+        c.commit()
+        return cur.rowcount > 0
+
+
 # =====================================================================
 # ENCARGOS
 # =====================================================================

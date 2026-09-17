@@ -1018,14 +1018,42 @@ async function cargarHistorial(){
           <td class="cifra" style="text-align:right">${
             v.impacto_total == null ? "—"
             : Number(v.impacto_total).toLocaleString("es-CO")}</td>
-          <td><button class="btn btn-contorno abrir" data-corrida="${v.corrida}">Abrir</button></td>
+          <td style="white-space:nowrap">
+            <button class="btn btn-contorno abrir" data-corrida="${v.corrida}">Abrir</button>
+            <button class="btn btn-contorno borrar" data-corrida="${v.corrida}"
+                    data-descr="${v.razon_social || v.nit} · ${v.periodo}"
+                    title="Eliminar esta revision del historial"
+                    style="margin-left:6px;color:var(--rojo)">Borrar</button>
+          </td>
         </tr>`).join("")}</tbody></table>`;
 
     caja.querySelectorAll(".abrir").forEach(b => {
       b.onclick = () => abrirRevision(b.dataset.corrida);
     });
+    caja.querySelectorAll(".borrar").forEach(b => {
+      b.onclick = () => borrarRevision(b.dataset.corrida, b.dataset.descr);
+    });
   } catch(e){
     caja.innerHTML = `<div class="aviso error"><div class="cuerpo">${e}</div></div>`;
+  }
+}
+
+async function borrarRevision(corrida, descripcion){
+  // Confirmar por descripcion, no por id. El id (12 hex) no le dice nada
+  // al auditor; "TERLICA SAS · 2026-07" si.
+  if(!confirm(`¿Eliminar la revision de "${descripcion}" del historial?\n\n`
+              + "El archivo del papel se borra y no se puede recuperar. "
+              + "Si necesita volver, tendra que revisar de nuevo.")) return;
+  try {
+    const r = await fetch(BASE + "/revisiones/" + corrida, {method:"DELETE"});
+    const data = await leerRespuesta(r);
+    if(!r.ok){
+      $("#msg").innerHTML = avisoError(data.detail || "No se pudo borrar");
+      return;
+    }
+    cargarClientes(); cargarHistorial();
+  } catch(e){
+    $("#msg").innerHTML = avisoError(e.message || e);
   }
 }
 

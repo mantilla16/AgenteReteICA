@@ -804,6 +804,38 @@ def ver_revision(corr: str, request: Request) -> dict:
     return datos
 
 
+@app.delete("/revisiones/{corr}")
+def eliminar_revision(corr: str, request: Request) -> dict:
+    """Elimina una revision del historial. Solo el auditor dueño puede.
+
+    Se borran DOS cosas: la fila del historial y el archivo del papel en
+    disco. La carpeta del encargo NO se toca -- puede tener otras
+    revisiones colgando y ademas los documentos originales.
+    """
+    usuario = request.state.usuario
+    fila = db.revision_de(corr, usuario["id"])
+    if fila is None:
+        raise HTTPException(404, "Esa revision no existe o no es suya.")
+
+    # Primero el archivo. Si el borrado del papel falla (permisos, disco),
+    # NO borramos la fila -- quedaria una fila apuntando a un archivo que
+    # ya no se puede localizar, o peor, huerfano en disco sin registro.
+    ruta = _ruta_papel(corr)
+    if ruta is not None:
+        try:
+            ruta.unlink()
+        except OSError as error:
+            raise HTTPException(
+                500, "No se pudo borrar el archivo del papel: %s" % error)
+
+    borrada = db.borrar_revision(corr, usuario["id"])
+    if not borrada:
+        # Race entre el chequeo y el DELETE -- si otro proceso la borro,
+        # el archivo ya no esta y la fila tampoco. No es error del usuario.
+        return {"borrada": False}
+    return {"borrada": True}
+
+
 def _fila_json(fila: dict) -> dict:
     """Las filas traen datetime, Decimal y uuid: nada de eso es JSON."""
     salida = {}
