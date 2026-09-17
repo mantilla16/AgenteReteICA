@@ -11,7 +11,10 @@ from pathlib import Path
 
 import pytest
 
-from motor_reteica.ia.cliente import ClienteIA, Respuesta, hash_prompt
+from motor_reteica.ia.cliente import (VARIABLE_LLAVE, VARIABLE_MODELO_LOCAL,
+                                      VARIABLE_PROVEEDOR, VARIABLE_URL_LOCAL,
+                                      ClienteIA, Respuesta, hash_prompt,
+                                      ia_configurada, proveedor)
 from motor_reteica.ia.controles_ia import ia1_plausibilidad, ia3_consistencia
 from motor_reteica.hallazgos import consolidar
 from motor_reteica.ingesta.auxiliar import leer_auxiliar
@@ -245,3 +248,94 @@ def test_la_ia_no_cambia_las_anclas():
     deterministas = [r for r in con_ia.resultados
                      if not r.codigo.startswith("IA-")]
     assert [r.estado for r in sin_ia.resultados] == [r.estado for r in deterministas]
+
+
+# --------------------------------------------------------------------------
+# El modelo local (Ollama): mismo contrato, sin llave
+# --------------------------------------------------------------------------
+
+class _RespuestaHTTP:
+    """Doble de la respuesta de httpx. No hay red en ninguna prueba."""
+
+    def __init__(self, datos, estado=200):
+        self._datos = datos
+        self.status_code = estado
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise RuntimeError("HTTP %d" % self.status_code)
+
+    def json(self):
+        return self._datos
+
+
+def _sin_ia(monkeypatch):
+    for v in (VARIABLE_LLAVE, VARIABLE_PROVEEDOR, VARIABLE_MODELO_LOCAL,
+              VARIABLE_URL_LOCAL):
+        monkeypatch.delenv(v, raising=False)
+
+
+def test_sin_nada_configurado_el_proveedor_sigue_siendo_anthropic(monkeypatch):
+    """La bateria de pruebas no configura nada: el default no puede cambiar."""
+    _sin_ia(monkeypatch)
+    assert proveedor() == "anthropic"
+    assert not ia_configurada()
+
+
+def test_con_modelo_local_no_hace_falta_llave(monkeypatch):
+    _sin_ia(monkeypatch)
+    monkeypatch.setenv(VARIABLE_MODELO_LOCAL, "qwen2.5:3b-instruct")
+    assert proveedor() == "local"
+    assert ia_configurada(), "con modelo local no se necesita ANTHROPIC_API_KEY"
+
+
+def test_el_papel_estampa_que_el_modelo_fue_local(monkeypatch):
+    """D9: el id exacto del modelo se estampa. Debe distinguirse de la nube."""
+    _sin_ia(monkeypatch)
+    monkeypatch.setenv(VARIABLE_MODELO_LOCAL, "qwen2.5:3b-instruct")
+    assert ClienteIA().modelo == "ollama/qwen2.5:3b-instruct"
+
+
+def test_al_modelo_local_se_le_pide_reproducibilidad(monkeypatch):
+    """Lo que D9 no pudo pedirle a Anthropic, aqui si: temperatura 0 y seed."""
+    _sin_ia(monkeypatch)
+    monkeypatch.setenv(VARIABLE_MODELO_LOCAL, "qwen2.5:3b-instruct")
+    enviado = {}
+
+    def falso_post(url, json=None, timeout=None):
+        enviado["url"] = url
+        enviado["cuerpo"] = json
+        return _RespuestaHTTP({"message": {"content": "[]"}})
+
+    import httpx
+    monkeypatch.setattr(httpx, "post", falso_post)
+
+    respuesta = ClienteIA().preguntar("eres un revisor", "revisa esto")
+
+    assert respuesta.texto == "[]"
+    assert enviado["url"].endswith("/api/chat")
+    assert enviado["cuerpo"]["model"] == "qwen2.5:3b-instruct"
+    assert enviado["cuerpo"]["stream"] is False
+    assert enviado["cuerpo"]["options"]["temperature"] == 0
+    assert enviado["cuerpo"]["options"]["seed"] == 0
+    roles = [m["role"] for m in enviado["cuerpo"]["messages"]]
+    assert roles == ["system", "user"]
+
+
+def test_si_el_modelo_local_no_responde_es_no_ejecutado_no_ok(recon,
+                                                             monkeypatch):
+    """D7 tambien aplica al modelo local: caido no puede significar OK."""
+    _sin_ia(monkeypatch)
+    monkeypatch.setenv(VARIABLE_MODELO_LOCAL, "qwen2.5:3b-instruct")
+
+    def falso_post(url, json=None, timeout=None):
+        raise OSError("connection refused")
+
+    import httpx
+    monkeypatch.setattr(httpx, "post", falso_post)
+
+    reconstruccion, borrador = recon
+    resultado = ia1_plausibilidad(reconstruccion, borrador, MUNICIPIO,
+                                  cliente=ClienteIA())
+    assert resultado.estado is Estado.NO_EJECUTADO
+    assert resultado.estado is not Estado.OK

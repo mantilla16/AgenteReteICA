@@ -32,7 +32,7 @@ from .. import correo as CO
 from .. import db
 from ..atestacion import AtestacionInvalida
 from ..identidad import IdentidadIncompatible
-from ..ia.cliente import ClienteIA
+from ..ia.cliente import ClienteIA, ia_configurada
 from ..ingesta._io import leer_filas
 from ..ingesta.borrador_pdf import leer_borrador
 from ..ingesta.formato_historico import normalizar_periodo
@@ -387,7 +387,15 @@ async def analizar(
     (carpeta / NOMBRE_ARCHIVO).write_text(
         json.dumps(manifiesto, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    cliente_ia = ClienteIA(api_key=api_key) if api_key else None
+    # Con modelo local no hay llave que pedirle a nadie: si el servidor esta
+    # configurado, la Revision Inteligente corre sola. La llave por formulario
+    # se conserva para quien quiera usar Anthropic desde su propia cuenta.
+    if api_key:
+        cliente_ia = ClienteIA(api_key=api_key, proveedor="anthropic")
+    elif ia_configurada():
+        cliente_ia = ClienteIA()
+    else:
+        cliente_ia = None
 
     try:
         ctx = revisar(carpeta, nit=nit, periodo=periodo,

@@ -90,18 +90,27 @@ def main(argv=None) -> int:
                              "el libro que arma el motor. Ver D10.")
     parser.add_argument("--revision-inteligente", action="store_true",
                         help="ejecuta los controles de IA (IA-1, IA-3). "
-                             "Requiere la llave en %s o --api-key."
-                             % VARIABLE_LLAVE)
+                             "Con modelo local (OLLAMA_MODELO) no requiere "
+                             "nada mas; con Anthropic requiere la llave en "
+                             "%s o --api-key." % VARIABLE_LLAVE)
     parser.add_argument("--api-key", default=None,
                         help="llave de Anthropic; por defecto se toma de %s"
                              % VARIABLE_LLAVE)
-    parser.add_argument("--modelo", default=MODELO_POR_DEFECTO)
+    parser.add_argument("--proveedor", choices=("local", "anthropic"),
+                        default=None,
+                        help="que modelo usar; por defecto se deduce del "
+                             "entorno (local si hay OLLAMA_MODELO)")
+    parser.add_argument("--modelo", default=None,
+                        help="id del modelo; por defecto %s con Anthropic, o "
+                             "el de OLLAMA_MODELO en local"
+                             % MODELO_POR_DEFECTO)
     args = parser.parse_args(argv)
 
     try:
         cliente_ia = None
         if args.revision_inteligente:
-            cliente_ia = ClienteIA(modelo=args.modelo, api_key=args.api_key)
+            cliente_ia = ClienteIA(modelo=args.modelo, api_key=args.api_key,
+                                   proveedor=args.proveedor)
         ctx = revisar(args.carpeta, nit=args.nit, periodo=args.periodo,
                       municipio=MUNICIPIOS[args.municipio],
                       cliente_ia=cliente_ia)

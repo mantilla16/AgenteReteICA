@@ -357,7 +357,6 @@ a.dl { display: inline-block; margin-top: 10px; text-decoration: none; }
             <select id="municipio"><option value="santa_marta">Santa Marta</option></select>
           </div>
           <div><label>Auditor que declara</label><input id="declarado_por" placeholder="Nombre"></div>
-          <div><label>Clave IA (opcional)</label><input id="apikey" type="password" placeholder="sk-ant-..."></div>
         </div>
         <div style="margin-top:18px"><button id="run" class="btn btn-principal">Revisar y generar papel</button></div>
         <div id="msg"></div>
@@ -554,7 +553,8 @@ $("#run").onclick = async () => {
   fd.append("periodo", $("#periodo").value);
   fd.append("municipio", $("#municipio").value);
   fd.append("declarado_por", $("#declarado_por").value);
-  fd.append("api_key", $("#apikey").value);
+  // La Revision Inteligente usa el modelo local del servidor: no hay clave
+  // que pedirle al auditor.
   $("#run").disabled = true; $("#run").textContent = "Procesando…";
   try {
     const r = await fetch(BASE + "/analizar", { method:"POST", body:fd });

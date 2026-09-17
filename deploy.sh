@@ -47,6 +47,12 @@ AUDITORIA_DSN=postgresql://USUARIO:CLAVE@localhost:5432/auditoria_puc
 
 # Envio del codigo de acceso. Sin esto el codigo solo se escribe en el log.
 AUDITORIA_CORREO_MODO=CONSOLA
+
+# Revision Inteligente con el modelo local de Ollama. Con esto definido no se
+# pide ninguna llave de API: el motor deduce que el proveedor es local.
+OLLAMA_MODELO=qwen2.5:3b-instruct
+OLLAMA_URL=http://127.0.0.1:11434
+IA_TIMEOUT=600
 #AUDITORIA_SMTP_HOST=smtp.office365.com
 #AUDITORIA_SMTP_PUERTO=587
 #AUDITORIA_SMTP_USUARIO=
