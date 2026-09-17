@@ -118,38 +118,19 @@ def _fecha(valor) -> str:
 
 
 def _depositar_aux_fiscal(libro, ctx) -> None:
+    """El auxiliar del cliente, pegado tal cual.
+
+    Antes se armaban filas a partir de ctx.lineas (objetos reprocesados con
+    signo invertido, cuenta filtrada, columnas normalizadas). Ahora la hoja
+    es EVIDENCIA: se pega el archivo que entrego el cliente sin tocar --
+    misma disposicion, mismos valores, mismo formato de columna. Si el que
+    revisa lo quiere ver de otra forma, abre el archivo original; lo que se
+    pega aca es la fuente.
+    """
     hoja = libro[_AUX_FISCAL[0]]
     inicio, fin = _AUX_FISCAL[1], _AUX_FISCAL[2]
-    _limpiar(hoja, inicio, fin, range(2, 16))
-
-    fila = inicio
-    for linea in ctx.lineas:
-        hoja.cell(row=fila, column=2, value=linea.cuenta)
-        hoja.cell(row=fila, column=3,
-                  value=_texto_de_cuenta(
-                      ctx.municipio.tarifa_por_cuenta.get(linea.cuenta, 0)))
-        hoja.cell(row=fila, column=4, value=linea.nit)
-        hoja.cell(row=fila, column=5, value=linea.tercero)
-        hoja.cell(row=fila, column=6, value=_fecha(linea.fecha_documento))
-        hoja.cell(row=fila, column=7, value=_fecha(linea.fecha_contabilizacion))
-        hoja.cell(row=fila, column=8, value=linea.referencia)
-        # El auxiliar de SAP trae los importes en NEGATIVO (naturaleza
-        # credito). El motor los normaliza a positivo para calcular; al
-        # depositarlos se les devuelve el signo, o el papel deja de
-        # parecerse al documento del cliente.
-        hoja.cell(row=fila, column=9, value=-int(linea.retencion))
-        hoja.cell(row=fila, column=10, value=int(ctx.periodo.split("-")[1]))
-        hoja.cell(row=fila, column=11, value="RE")
-        hoja.cell(row=fila, column=12, value=linea.documento)
-        hoja.cell(row=fila, column=13, value=linea.concepto)
-        hoja.cell(row=fila, column=15, value="DA09")
-        fila += 1
-
-    # El total se mueve con el numero de lineas: dejarlo en la fila 19 fija
-    # lo dejaria sumando un rango que ya no corresponde.
-    hoja.cell(row=fila, column=2, value="TOTAL")
-    hoja.cell(row=fila, column=9,
-              value="=SUM(I%d:I%d)" % (inicio, max(inicio, fila - 1)))
+    _limpiar(hoja, inicio, fin, range(1, 16))
+    _pegar_fuente_completa(hoja, (ctx.rutas or {}).get("auxiliar"), inicio, fin)
 
 
 def _depositar_cuadro_reteica(libro, ctx) -> None:
@@ -237,199 +218,105 @@ def _texto_no_vacio(valor) -> bool:
 
 
 def _depositar_balance(libro, ctx) -> None:
-    """Solo las cuentas 2368, y el papel lo dice.
+    """El balance del cliente, pegado tal cual.
 
-    El motor unicamente valida esas cuentas (C2). Depositar las 349 filas del
-    balance completo pondria en el papel cifras que nunca miro, dando a
-    entender que las reviso.
-
-    LAS FILAS SOBRANTES SE BORRAN, no se ocultan. La plantilla viene con 338
-    de sus 345 filas de balance OCULTAS -- la firma las colapso al archivar el
-    mes anterior -- y el motor escribia justo ahi, asi que el deposito
-    funcionaba y la hoja se veia vacia. Ocultar las que sobran arreglaba eso
-    pero dejaba la numeracion saltando de la 9 a la 350, que se lee como una
-    hoja rota. Ahora se eliminan: la hoja termina donde termina la evidencia.
-    Se puede borrar filas porque ninguna formula apunta ya a esta hoja -- lo
-    que cruza de hoja lo deposita el motor como valor.
-
-    SE MUESTRAN TAMBIEN LAS CUENTAS EXCLUIDAS. El papel afirmaba que
-    2368010090 se trato como contrapartida de pago y esa cuenta no aparecia
-    por ningun lado: la exclusion no se podia verificar. Van al final, con su
-    saldo acumulado, que es la cifra por la que el motor las senala (M11).
+    Antes se filtraban las cuentas 2368 y se anotaba en una columna extra
+    LECTURA DEL MOTOR. Ahora la hoja es EVIDENCIA: se pega el archivo que
+    entrego el cliente sin tocar. El motor sigue verificando solo las 2368
+    (C2), pero eso se registra en el resumen de la revision -- no en la
+    hoja de la fuente.
     """
     hoja = libro[_BALANCE[0]]
     inicio, fin = _BALANCE[1], _BALANCE[2]
-    _limpiar(hoja, inicio, fin, range(2, 11))
+    _limpiar(hoja, inicio, fin, range(1, 11))
+    _pegar_fuente_completa(hoja, (ctx.rutas or {}).get("balance"), inicio, fin)
 
-    # El papel de trabajo ES la evidencia: esta hoja transcribe el balance
-    # COMPLETO tal como lo entrego el cliente, no el extracto de la 2368 que
-    # usan los cruces. Asi el que revisa puede comprobar a mano el saldo que
-    # el motor tomo, sin salir del papel -- que es justo lo que hace el
-    # auditor cuando lo arma a mano.
-    if _transcribir_balance(hoja, ctx, inicio, fin):
-        return
 
-    hoja.cell(row=3, column=2,
-              value="EXTRACTO de la cuenta 2368 del balance de prueba. No es "
-                    "el balance completo: el motor solo verifica esas "
-                    "cuentas. La columna que entra a los cruces es 'Saldo "
-                    "Haber per.inf.' -- el movimiento del periodo; el saldo "
-                    "acumulado se muestra solo como referencia, porque "
-                    "arrastra los periodos anteriores.")
+def _pegar_fuente_completa(hoja, ruta, inicio: int, fin: int) -> None:
+    """Copia el archivo del cliente TAL CUAL en la hoja del papel.
 
-    if not ctx.saldos:
-        hoja.cell(row=inicio, column=3,
-                  value="NO EJECUTADO: no se obtuvo el balance de prueba")
-        hoja.row_dimensions[inicio].hidden = False
+    - Cada fila se copia posicion por posicion (A -> A, B -> B, ...), sin
+      reordenar ni interpretar. Es lo que hace el auditor a mano.
+    - El encabezado va en la fila anterior a `inicio`, para respetar la
+      forma de la plantilla (banner en la parte superior).
+    - Las filas que sobren se BORRAN, no se ocultan: la hoja termina donde
+      termina la evidencia. Ninguna formula del papel apunta a esta hoja.
+
+    Si no hay ruta o no se puede leer, la hoja queda con el area limpia y un
+    aviso de que faltaba el archivo -- el papel no se cae por la evidencia.
+    """
+    if not ruta:
+        hoja.cell(row=inicio, column=2,
+                  value="NO SE APORTO EL ARCHIVO DEL CLIENTE")
         _recortar(hoja, inicio + 1, fin)
         return
 
-    fila = inicio
-    for cuenta, saldo in sorted(ctx.saldos.items()):
-        hoja.row_dimensions[fila].hidden = False
-        hoja.cell(row=fila, column=2, value="DA09")
-        hoja.cell(row=fila, column=3, value=cuenta)
-        hoja.cell(row=fila, column=4,
-                  value=_texto_de_cuenta(
-                      ctx.municipio.tarifa_por_cuenta.get(cuenta, 0)))
-        hoja.cell(row=fila, column=5, value="COP")
-        hoja.cell(row=fila, column=9, value=int(saldo))
-        acumulado = ctx.acumulados.get(cuenta)
-        if acumulado is not None:
-            hoja.cell(row=fila, column=10, value=int(acumulado))
-        fila += 1
-
-    for cuenta in sorted(ctx.candidatas_sin_declarar):
-        hoja.row_dimensions[fila].hidden = False
-        hoja.cell(row=fila, column=2, value="DA09")
-        hoja.cell(row=fila, column=3, value=cuenta)
-        hoja.cell(row=fila, column=4,
-                  value="EXCLUIDA de los cruces: saldo de naturaleza debito, "
-                        "tratada como contrapartida de pago. Sin atestacion "
-                        "del auditor (M11).")
-        hoja.cell(row=fila, column=5, value="COP")
-        acumulado = ctx.acumulados.get(cuenta)
-        if acumulado is not None:
-            hoja.cell(row=fila, column=10, value=int(acumulado))
-        fila += 1
-
-    _recortar(hoja, fila, fin)
-
-
-def _transcribir_balance(hoja, ctx, inicio: int, fin: int) -> bool:
-    """Vuelca el balance de prueba COMPLETO, tal como vino.
-
-    No interpreta columnas: copia las que traiga el archivo, en su orden y
-    con sus propias etiquetas. Los clientes no exportan todos igual, y el
-    papel tiene que mostrar el documento que se recibio -- no una version
-    normalizada de el, que ya no seria evidencia de nada.
-
-    Lo unico que se detecta es DONDE empieza el encabezado, y para eso se usa
-    el mismo localizador que ya usa la ingesta: si el motor supo leer ese
-    archivo, sabe donde arranca.
-
-    Devuelve False si no hay balance o no se pudo leer, para que el llamador
-    caiga al extracto de siempre en vez de dejar la hoja vacia.
-    """
-    ruta = (ctx.rutas or {}).get("balance")
-    if not ruta:
-        return False
-
     try:
         from motor_reteica.ingesta._io import leer_filas
-        from motor_reteica.parametros.columnas import (FIRMA_BALANCE,
-                                                       ROLES_BALANCE,
-                                                       localizar_columnas)
-        filas = leer_filas(ruta, hoja="BALANCE")
-        encabezado, col = localizar_columnas(filas, ROLES_BALANCE,
-                                             FIRMA_BALANCE)
-    except Exception:
-        # Que el papel no se caiga por la hoja de evidencia: el motor ya hizo
-        # su trabajo y el extracto sigue siendo una salida valida.
-        return False
+        filas = leer_filas(ruta)
+    except Exception as error:
+        hoja.cell(row=inicio, column=2,
+                  value="NO SE PUDO LEER EL ARCHIVO: %s" % error)
+        _recortar(hoja, inicio + 1, fin)
+        return
 
-    datos = [f for f in filas[encabezado + 1:] if any(
-        c not in (None, "") for c in f)]
-    if not datos:
-        return False
+    # Descarta filas totalmente vacias al final (algunos exports dejan
+    # muchas). Las intermedias vacias se conservan porque el auditor las
+    # espera para leer bien la estructura.
+    while filas and not any(c not in (None, "") for c in filas[-1]):
+        filas.pop()
+    if not filas:
+        _recortar(hoja, inicio, fin)
+        return
 
-    # Transcribir 349 filas sin decir nada daria a entender que el motor las
-    # reviso todas. Se transcriben COMO EVIDENCIA; lo que el motor verifico
-    # queda marcado cuenta por cuenta en la columna LECTURA DEL MOTOR.
-    hoja.cell(row=3, column=2,
-              value="Balance de prueba COMPLETO, transcrito como lo entrego "
-                    "el cliente: es la EVIDENCIA, no una seleccion. El motor "
-                    "solo verifica las cuentas 2368 -- las demas filas estan "
-                    "aqui para poder comprobar los saldos, no porque se hayan "
-                    "revisado. La columna LECTURA DEL MOTOR dice, cuenta por "
-                    "cuenta, cual entro a los cruces y cual no. La cifra que "
-                    "se cruza es 'Saldo Haber per.inf.' (el movimiento del "
-                    "periodo); el acumulado arrastra meses anteriores.")
+    # El encabezado (primera fila con etiquetas) va justo arriba del area.
+    # Se detecta por heuristica: primera fila que tenga varias celdas no
+    # vacias en las primeras columnas.
+    encabezado = _detectar_encabezado(filas)
 
-    _escribir_fila(hoja, inicio - 1, filas[encabezado])
-    hoja.cell(row=inicio - 1, column=_NOTA, value="LECTURA DEL MOTOR")
+    if encabezado > 0:
+        _escribir_fila(hoja, inicio - 1, filas[encabezado])
 
-    columna_cuenta = col["cuenta"]
+    # Las filas totalmente vacias del origen se saltan: SAP y otros ERP dejan
+    # filas en blanco entre metadatos y detalle. Contarlas contra el rango
+    # deja los ultimos movimientos por fuera de la hoja, que es peor que
+    # perder la disposicion exacta -- la evidencia debe estar completa.
     fila = inicio
-    for origen in datos:
+    for origen in filas[encabezado + 1:]:
+        if not any(c not in (None, "") for c in origen):
+            continue
         if fila > fin:
             hoja.cell(row=fin, column=2,
-                      value="TRUNCADO: el balance trae mas filas de las que "
-                            "caben en esta hoja (%d)." % len(datos))
+                      value="TRUNCADO: el archivo trae mas filas de las que "
+                            "caben en esta hoja.")
             break
         hoja.row_dimensions[fila].hidden = False
         _escribir_fila(hoja, fila, origen)
-
-        # La fuente se transcribe intacta; lo que el motor tenga que decir
-        # sobre una cuenta va A LA DERECHA, en una columna propia. Antes esta
-        # anotacion ocupaba el lugar del dato y por eso habia que elegir entre
-        # mostrar la evidencia o explicarla.
-        cuenta = _texto_cuenta(origen, columna_cuenta)
-        if cuenta:
-            nota = _nota_de_cuenta(ctx, cuenta)
-            if nota:
-                hoja.cell(row=fila, column=_NOTA, value=nota)
         fila += 1
 
     _recortar(hoja, fila, fin)
-    return True
 
 
-# Columna donde el motor anota su lectura, despues de las diez que puede
-# traer el balance. La fuente no se toca.
-_NOTA = 11
+def _detectar_encabezado(filas) -> int:
+    """La primera fila que trae >= 3 celdas con texto de encabezado.
 
-
-def _texto_cuenta(origen, indice) -> str:
-    if indice is None or indice >= len(origen):
-        return ""
-    valor = origen[indice]
-    return str(valor).strip() if valor is not None else ""
-
-
-def _nota_de_cuenta(ctx, cuenta: str) -> str:
-    """Que dice el motor sobre esta cuenta del balance, si dice algo."""
-    if cuenta in ctx.candidatas_sin_declarar:
-        return ("EXCLUIDA de los cruces: saldo de naturaleza debito, tratada "
-                "como contrapartida de pago. Sin atestacion que lo respalde, "
-                "el motor no la cruza (C13).")
-    if ctx.saldos and cuenta in ctx.saldos:
-        tarifa = ctx.municipio.tarifa_por_cuenta.get(cuenta, 0)
-        return "CRUZADA por C2 — %s" % _texto_de_cuenta(tarifa)
-    return ""
+    En SAP la fila del encabezado va precedida de un banner (titulo, sociedad,
+    periodo). Sin buscar el encabezado esas 4 filas de banner se pierden al
+    escribir a partir de `inicio - 1`. Con la heuristica se respeta la forma.
+    """
+    for i, fila in enumerate(filas[:15]):
+        con_texto = sum(1 for c in fila
+                        if isinstance(c, str) and c.strip())
+        if con_texto >= 3:
+            return i
+    return 0
 
 
 def _escribir_fila(hoja, fila: int, valores) -> None:
-    """Copia una fila del origen columna por columna, sin reordenar.
-
-    El origen ya trae su propia columna A (vacia en los export de SAP), asi
-    que se copia posicion por posicion: A va a A y B va a B. Desplazarlo una
-    columna dejaba el 'Soc.' bajo el encabezado 'Cta.mayor' y todo el balance
-    corrido, que es peor que no traerlo.
-    """
+    """Copia una fila del origen columna por columna, sin reordenar."""
     for desplazamiento, valor in enumerate(valores):
         columna = 1 + desplazamiento
-        if columna > 10:          # la hoja de la plantilla llega hasta J
+        if columna > 15:          # la hoja de la plantilla llega hasta O
             break
         celda = hoja.cell(row=fila, column=columna)
         if _escribible(celda):
@@ -756,7 +643,13 @@ def depositar(ctx, destino, plantilla: Path = None,
     _depositar_check_list(libro, ctx)
     _depositar_declaracion(libro, ctx)
     _depositar_facturas(libro, ctx)
-    _depositar_borrador_terlica(libro, ctx)
+    # BORRADOR TERLICA: Robinson lo dijo en la reunion, no la usa. Se OCULTA
+    # -- no se elimina -- porque fidelidad.py restaura las hojas desde el
+    # paquete original (asi conserva logo y config de impresion), y borrar
+    # una hoja con `del libro[nombre]` no solo la resucita: desordena los
+    # ids de las demas hojas y aterrizan contenidos cambiados.
+    if "BORRADOR TERLICA" in libro.sheetnames:
+        libro["BORRADOR TERLICA"].sheet_state = "hidden"
     _depositar_revision_ica(libro, ctx)
     _depositar_cruce_universal(libro, ctx, total_declarado_confirmado)
     _depositar_conclusiones(libro, ctx)

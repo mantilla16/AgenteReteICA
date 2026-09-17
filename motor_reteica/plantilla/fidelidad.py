@@ -52,6 +52,52 @@ _PARTES_CON_VALORES = re.compile(
 _DESCARTAR = "xl/calcChain.xml"
 
 
+_RE_SHEET = re.compile(
+    r'<sheet\b[^/>]*\bname="([^"]+)"[^/>]*\bsheetId="[^"]+"[^/>]*/?>')
+
+
+def _visibilidades(xml: str) -> dict:
+    """Devuelve {nombre_de_hoja: 'visible'|'hidden'|'veryHidden'}."""
+    salida = {}
+    for m in _RE_SHEET.finditer(xml):
+        estado_m = re.search(r'state="([^"]+)"', m.group(0))
+        salida[m.group(1)] = estado_m.group(1) if estado_m else "visible"
+    return salida
+
+
+def _propagar_visibilidad(xml_original: str, xml_escrito: str) -> str:
+    """Aplica al workbook original el sheet state del openpyxl output.
+
+    fidelidad.py conservaba el xml original tal cual. Eso mantiene formato y
+    orden, pero tambien mantiene la visibilidad -- si el codigo del papel
+    marca una hoja como oculta, ese cambio se perdia al escribir. Ahora,
+    para cada hoja que el openpyxl output haya marcado con un estado
+    distinto al del original, se remienda el atributo state en el xml.
+    """
+    de_openpyxl = _visibilidades(xml_escrito)
+    del_original = _visibilidades(xml_original)
+
+    resultado = xml_original
+    for nombre, estado in de_openpyxl.items():
+        if del_original.get(nombre) == estado:
+            continue
+        resultado = _remendar_state(resultado, nombre, estado)
+    return resultado
+
+
+def _remendar_state(xml: str, nombre: str, estado: str) -> str:
+    """Injerta o reemplaza el atributo state en la etiqueta <sheet> del nombre."""
+    patron = re.compile(
+        r'(<sheet\b[^/>]*\bname="%s"[^/>]*?)(/?>)' % re.escape(nombre))
+    def _reemplazar(m):
+        etiqueta, cierre = m.group(1), m.group(2)
+        etiqueta = re.sub(r'\s+state="[^"]+"', "", etiqueta)
+        if estado != "visible":
+            etiqueta += ' state="%s"' % estado
+        return etiqueta + cierre
+    return patron.sub(_reemplazar, xml, count=1)
+
+
 def _forzar_recalculo(xml: str) -> str:
     """Marca el libro para que Excel recalcule TODO al abrirlo.
 
@@ -162,7 +208,9 @@ def guardar_conservando_formato(libro, plantilla: Path, destino: Path) -> Path:
                         salida.writestr(nombre, contenido)
                     elif nombre == "xl/workbook.xml":
                         salida.writestr(nombre, _forzar_recalculo(
-                            originales[nombre].decode("utf-8")))
+                            _propagar_visibilidad(
+                                originales[nombre].decode("utf-8"),
+                                escrito.read(nombre).decode("utf-8"))))
                     else:
                         salida.writestr(nombre, originales[nombre])
 

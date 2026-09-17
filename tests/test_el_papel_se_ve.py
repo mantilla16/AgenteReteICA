@@ -114,28 +114,20 @@ def test_el_balance_termina_donde_termina_la_evidencia(libro):
     assert not ocultas, "quedan filas ocultas: %s" % ocultas
 
 
-def test_la_cuenta_excluida_se_ve_con_la_cifra_que_la_delata(libro, contexto):
-    """El papel afirmaba una exclusion que el lector no podia verificar.
-
-    C13 avisa que 2368010090 se trato como contrapartida de pago por su
-    saldo, y esa cuenta no aparecia en ninguna hoja. Ahora va al final del
-    extracto con su saldo acumulado, que es la cifra por la que el motor la
-    senala: es la unica 2368 con saldo positivo.
-    """
+def test_la_cuenta_excluida_aparece_en_el_balance(libro, contexto):
+    """La cuenta excluida (2368010090) tiene que estar VISIBLE en el balance
+    del papel. Antes se le anotaba "EXCLUIDA" en la columna del motor; ahora,
+    con la fuente pegada tal cual, la anotacion vive en el resumen de la
+    revision --no en la hoja de la fuente-- pero la cuenta misma sigue ahi:
+    quien revisa tiene que poder localizarla."""
     if not contexto.candidatas_sin_declarar:
         pytest.skip("este mes no hay cuentas excluidas por naturaleza")
 
     hoja = libro["BALANCE"]
-    filas = {str(hoja.cell(row=f, column=3).value): f
-             for f in range(5, hoja.max_row + 1)
-             if hoja.cell(row=f, column=3).value}
+    cuentas = {str(c.value) for c in hoja["C"] if c.value is not None}
     for cuenta in contexto.candidatas_sin_declarar:
-        assert cuenta in filas, "la cuenta excluida %s no esta en el papel" % cuenta
-        fila = filas[cuenta]
-        # La exclusion se declara en la columna del motor. La fila trae ahora
-        # las cifras del balance del cliente, sin tocar: es la evidencia por
-        # la que el motor la senala, y antes no se podia ver.
-        assert "EXCLUIDA" in str(hoja.cell(row=fila, column=11).value)
+        assert cuenta in cuentas, (
+            "la cuenta excluida %s no aparece en el balance" % cuenta)
 
 
 def test_el_saldo_acumulado_llega_al_papel(libro, contexto):
