@@ -558,8 +558,25 @@ const drop = $("#drop"), file = $("#file");
 drop.onclick = () => file.click();
 drop.ondragover = e => { e.preventDefault(); drop.classList.add("hover"); };
 drop.ondragleave = () => drop.classList.remove("hover");
-drop.ondrop = e => { e.preventDefault(); drop.classList.remove("hover"); add(e.dataTransfer.files); };
-file.onchange = () => { add(file.files); file.value = ""; };
+/* La lista se COPIA antes de cualquier await, y por dos razones distintas:
+
+   - input.value = "" vacia input.files. Como add() es async, esa linea corria
+     antes de que el bucle leyera nada y el archivo se perdia: el tablero
+     aparecia vacio y "volver a cargar" no hacia nada.
+   - e.dataTransfer solo es valido mientras se despacha el evento. Al primer
+     await deja de serlo, asi que arrastrar tampoco era seguro.
+
+   Array.from() resuelve las dos: saca los File de la lista viva antes de
+   ceder el control. */
+drop.ondrop = e => {
+  e.preventDefault(); drop.classList.remove("hover");
+  add(Array.from(e.dataTransfer.files));
+};
+file.onchange = () => {
+  const elegidos = Array.from(file.files);
+  file.value = "";              // permite volver a elegir el MISMO archivo
+  add(elegidos);
+};
 
 async function add(lista){
   try {
