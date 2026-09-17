@@ -348,12 +348,74 @@ def inicio() -> str:
 # Deteccion de roles por ESTRUCTURA
 # --------------------------------------------------------------------------
 
+# Marcas que aparecen en los borradores oficiales de ICA y que las facturas
+# NO llevan. "RETENCION" solo (sin contexto) tambien la trae una factura en
+# la seccion de retenciones a favor, asi que no basta.
+_MARCAS_FUERTES_DE_BORRADOR = (
+    "AGENTE RETENEDOR",
+    "REPORTE - RETENCION",
+    "REPORTE RETENCION",
+    "FORMULARIO DE DECLARACI",
+    "DECLARACION MENSUAL RETEICA",
+    "DECLARACION RETEICA",
+    "DECLARACION DE INDUSTRIA Y COMERCIO",
+    "RETENCION EN LA FUENTE INDUSTRIA Y COMERCIO",
+    "RETEICA",
+    "RETE ICA",
+    "RTE ICA",
+    "BORRADOR",
+)
+
+# Marcas de factura en el ENCABEZADO -- primeras lineas. Si aparecen ahi,
+# es una factura, aunque despues traiga la palabra 'retencion'.
+_MARCAS_FACTURA_ENCABEZADO = (
+    "FACTURA ELECTRONICA", "FACTURA ELETRONICA",  # el segundo por typo del ERP
+    "FACTURA DE VENTA",
+    "REPRESENTACION GRAFICA DE LA FACTURA",
+    "AUTORIZACION DE FACTURACION",
+    "NUM. DE FACTURACION DIAN",
+)
+
+
 def _es_borrador_pdf(ruta: Path) -> bool:
+    """El PDF luce como un borrador de ReteICA, sea del municipio que sea.
+
+    Antes esto usaba el extractor de Santa Marta para decidir: cualquier
+    borrador de otro municipio (San Alberto, Barranquilla...) fallaba la
+    prueba y quedaba "sin clasificar". Era la causa de que la interfaz
+    dijera 'no reconocio: BORRADOR RETEICA ...pdf' sobre archivos que si
+    son borradores, solo que de un formato que aun no ganaba renglones.
+
+    Ahora es una clasificacion por marcas: tiene NIT, trae una marca
+    fuerte de borrador, Y NO trae marca de factura en el encabezado. Sin la
+    exclusion las facturas caian como borrador porque tambien dicen
+    'retencion' en la seccion de impuestos.
+    """
+    from ..ingesta.borrador_universal import leer_borrador_universal
     try:
-        leer_borrador(ruta)
-        return True
+        ext = leer_borrador_universal(ruta)
     except Exception:
         return False
+    if not ext.nit:
+        return False
+    try:
+        import pdfplumber
+        with pdfplumber.open(ruta) as pdf:
+            texto = " ".join((p.extract_text() or "") for p in pdf.pages[:1])
+    except Exception:
+        return False
+    texto_norm = _sin_acentos(texto.upper())
+    encabezado_norm = _sin_acentos(
+        "\n".join(texto.splitlines()[:6]).upper())
+
+    if any(m in encabezado_norm for m in _MARCAS_FACTURA_ENCABEZADO):
+        return False
+    return any(m in texto_norm for m in _MARCAS_FUERTES_DE_BORRADOR)
+
+
+def _sin_acentos(cadena: str) -> str:
+    return (cadena.replace("Ó", "O").replace("Í", "I").replace("É", "E")
+                  .replace("Á", "A").replace("Ú", "U").replace("Ñ", "N"))
 
 
 _MARCAS_DE_FACTURA = ("FACTURA", "FACTURA ELECTRONICA", "FACTURA DE VENTA")
