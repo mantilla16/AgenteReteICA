@@ -80,6 +80,52 @@ def test_aux_fiscal_conserva_los_encabezados_de_la_fuente(papel):
     assert any("Asignaci" in t for t in textos)   # Asignacion, con o sin tilde
 
 
+# --------------------------------------------------------------------------
+# Reglas de la guia del auditor sobre BALANCE (docx del 17-sep):
+#   - Autofiltro por Cta.mayor.
+#   - Fila de subtotal con SUBTOTAL(9,...) sobre el bloque de retenciones.
+# --------------------------------------------------------------------------
+
+def test_balance_trae_autofiltro_para_filtrar_por_2368(papel):
+    """El auditor filtra por 'CTA mayor que empieza por 2368' para dejar
+    solo las cuentas de ReteICA. Sin autofiltro tiene que activarlo a mano."""
+    hoja = papel["BALANCE"]
+    assert hoja.auto_filter.ref, "no hay autofiltro en la hoja BALANCE"
+
+
+def test_balance_agrega_subtotal_con_funcion_subtotal(papel):
+    """SUBTOTAL(9,...) suma SOLO filas visibles: con el filtro por 2368,
+    el subtotal se ajusta solo. Un SUM(...) sumaria las ocultas tambien y
+    daria el gran total en vez del subtotal ICA."""
+    hoja = papel["BALANCE"]
+    fila_sub = hoja.max_row
+    for columna in ("H", "I"):
+        formula = str(hoja["%s%d" % (columna, fila_sub)].value or "")
+        assert formula.upper().startswith("=SUBTOTAL(9,"), (
+            "columna %s: %r no es SUBTOTAL" % (columna, formula))
+    # J = I - H (neto del periodo)
+    j = str(hoja["J%d" % fila_sub].value or "")
+    assert j == "=I%d-H%d" % (fila_sub, fila_sub), j
+
+
+def test_balance_acota_el_rango_al_bloque_de_retenciones(papel):
+    """El subtotal apunta al bloque 236x, no al balance entero. Motivo: el
+    balance trae una fila de total general de SAP (H = 51 mil millones en
+    TERLICA); incluirla sin filtro duplicaria el total del papel."""
+    hoja = papel["BALANCE"]
+    formula = str(hoja["H%d" % hoja.max_row].value or "")
+    import re
+    m = re.match(r"=SUBTOTAL\(9,H(\d+):H(\d+)\)", formula)
+    assert m, "no encontre el rango en %r" % formula
+    inicio, fin = int(m.group(1)), int(m.group(2))
+    # La cuenta en cada fila del rango debe empezar por 236.
+    for f in range(inicio, fin + 1):
+        cuenta = str(hoja.cell(row=f, column=3).value or "")
+        assert cuenta.startswith("236"), (
+            "fila %d dentro del rango del subtotal trae cuenta %r "
+            "-- deberia ser 236x" % (f, cuenta))
+
+
 def test_las_demas_hojas_no_desaparecieron(papel):
     """Ocultar BORRADOR TERLICA no puede haber tumbado a nadie mas."""
     esperadas = {"Check List", "DECLARACION", "Pago", "REVISION ICA",

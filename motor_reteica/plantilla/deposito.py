@@ -218,18 +218,83 @@ def _texto_no_vacio(valor) -> bool:
 
 
 def _depositar_balance(libro, ctx) -> None:
-    """El balance del cliente, pegado tal cual.
+    """El balance del cliente, pegado tal cual, con subtotales al final.
 
-    Antes se filtraban las cuentas 2368 y se anotaba en una columna extra
-    LECTURA DEL MOTOR. Ahora la hoja es EVIDENCIA: se pega el archivo que
-    entrego el cliente sin tocar. El motor sigue verificando solo las 2368
-    (C2), pero eso se registra en el resumen de la revision -- no en la
-    hoja de la fuente.
+    La guia del auditor especifica:
+      - Pegar el balance completo (evidencia).
+      - Autofiltro en el encabezado, para que el que revisa pueda filtrar
+        por 'Cta.mayor que empiece por 2368' y ver solo las cuentas ICA.
+      - Fila de subtotal al final con SUBTOTAL(9,...) sobre las columnas de
+        movimiento del periodo. SUBTOTAL(9,...) es especial: SOLO suma
+        filas visibles del rango. Con el filtro activo, los subtotales se
+        ajustan a las 2368 automaticamente -- justo como lo arma Robinson
+        a mano.
     """
     hoja = libro[_BALANCE[0]]
     inicio, fin = _BALANCE[1], _BALANCE[2]
-    _limpiar(hoja, inicio, fin, range(1, 11))
-    _pegar_fuente_completa(hoja, (ctx.rutas or {}).get("balance"), inicio, fin)
+    _limpiar(hoja, inicio, fin, range(1, 12))
+    ultima = _pegar_fuente_completa(hoja,
+                                    (ctx.rutas or {}).get("balance"),
+                                    inicio, fin)
+    if ultima is None:
+        return
+    _sellar_balance_con_subtotales(hoja, encabezado=inicio - 1,
+                                   primera_dato=inicio, ultima_dato=ultima)
+
+
+def _sellar_balance_con_subtotales(hoja, encabezado: int,
+                                   primera_dato: int, ultima_dato: int) -> None:
+    """Agrega autofiltro y subtotales al final del balance pegado.
+
+    Columnas convencionales del export de SAP 'Saldos de cuentas de mayor':
+      B Sociedad · C Cta.mayor · D Texto · E Moneda
+      F Arrastre · G Saldo per.anteriores
+      H Periodo de informe DEBE · I Saldo Haber per.inf. · J Saldo acumulado
+
+    El rango del subtotal se acota al BLOQUE DE RETENCIONES (cuentas que
+    empiezan por 236), no todo el balance. Motivo: el balance suele traer
+    una fila de TOTAL GENERAL de SAP al final; incluirla en un SUM sin
+    filtro daria el doble del total real. SUBTOTAL(9,...) respeta el filtro
+    del auditor por 2368, pero acotar el rango sirve por si nadie filtra.
+    """
+    if ultima_dato < primera_dato:
+        return
+
+    inicio_ret, fin_ret = _rango_de_retenciones(hoja, primera_dato, ultima_dato)
+    if inicio_ret is None:
+        # No hay cuentas 236 en el balance -- muy raro para un papel de
+        # ReteICA, pero se cubre el rango entero para no dejar la fila
+        # de subtotal apuntando a nada.
+        inicio_ret, fin_ret = primera_dato, ultima_dato
+
+    fila_sub = ultima_dato + 1
+    for columna in ("H", "I"):
+        hoja["%s%d" % (columna, fila_sub)] = (
+            "=SUBTOTAL(9,%s%d:%s%d)"
+            % (columna, inicio_ret, columna, fin_ret))
+    hoja["J%d" % fila_sub] = "=I%d-H%d" % (fila_sub, fila_sub)
+
+    # Autofiltro: cubre el encabezado y todas las filas de datos, no la de
+    # subtotal (SUBTOTAL respeta el filtro; incluir la fila del subtotal
+    # dentro del rango filtrable la ocultaria al filtrar).
+    hoja.auto_filter.ref = "B%d:J%d" % (encabezado, ultima_dato)
+
+
+def _rango_de_retenciones(hoja, desde: int, hasta: int) -> tuple:
+    """Primera y ultima fila cuya Cta.mayor (col C) empiece por '236'.
+
+    236x cubre TODAS las cuentas de retenciones: 2365 fuente, 2367 IVA,
+    2368 ICA. El subtotal cubre el bloque completo y el filtro del auditor
+    lo acota al 2368 cuando quiere solo ICA.
+    """
+    primera = ultima = None
+    for f in range(desde, hasta + 1):
+        cuenta = hoja.cell(row=f, column=3).value
+        if cuenta and str(cuenta).startswith("236"):
+            if primera is None:
+                primera = f
+            ultima = f
+    return primera, ultima
 
 
 def _pegar_fuente_completa(hoja, ruta, inicio: int, fin: int) -> None:
@@ -249,7 +314,7 @@ def _pegar_fuente_completa(hoja, ruta, inicio: int, fin: int) -> None:
         hoja.cell(row=inicio, column=2,
                   value="NO SE APORTO EL ARCHIVO DEL CLIENTE")
         _recortar(hoja, inicio + 1, fin)
-        return
+        return None
 
     try:
         from motor_reteica.ingesta._io import leer_filas
@@ -258,7 +323,7 @@ def _pegar_fuente_completa(hoja, ruta, inicio: int, fin: int) -> None:
         hoja.cell(row=inicio, column=2,
                   value="NO SE PUDO LEER EL ARCHIVO: %s" % error)
         _recortar(hoja, inicio + 1, fin)
-        return
+        return None
 
     # Descarta filas totalmente vacias al final (algunos exports dejan
     # muchas). Las intermedias vacias se conservan porque el auditor las
@@ -267,7 +332,7 @@ def _pegar_fuente_completa(hoja, ruta, inicio: int, fin: int) -> None:
         filas.pop()
     if not filas:
         _recortar(hoja, inicio, fin)
-        return
+        return None
 
     # El encabezado (primera fila con etiquetas) va justo arriba del area.
     # Se detecta por heuristica: primera fila que tenga varias celdas no
@@ -281,8 +346,18 @@ def _pegar_fuente_completa(hoja, ruta, inicio: int, fin: int) -> None:
     # filas en blanco entre metadatos y detalle. Contarlas contra el rango
     # deja los ultimos movimientos por fuera de la hoja, que es peor que
     # perder la disposicion exacta -- la evidencia debe estar completa.
+    # Al final del archivo se descartan filas que sean "solo numeros al
+    # final" -- tipicamente subtotales calculados por el auditor que se
+    # colaron. Los detecto por: no tienen ni sociedad (col B) ni cuenta (col
+    # C) pero si numeros en columnas del medio. No se filtran en el interior:
+    # ahi un vacio puntual es del cliente, y descartar seria alterar la
+    # evidencia.
+    filas_de_datos = filas[encabezado + 1:]
+    while filas_de_datos and _es_subtotal_del_final(filas_de_datos[-1]):
+        filas_de_datos.pop()
+
     fila = inicio
-    for origen in filas[encabezado + 1:]:
+    for origen in filas_de_datos:
         if not any(c not in (None, "") for c in origen):
             continue
         if fila > fin:
@@ -295,6 +370,28 @@ def _pegar_fuente_completa(hoja, ruta, inicio: int, fin: int) -> None:
         fila += 1
 
     _recortar(hoja, fila, fin)
+    # Devuelve el numero de la ultima fila escrita (o None si no hubo datos).
+    # El llamador puede usarla para agregar totales o autofiltros que
+    # dependen del rango real, no del limite duro del rango de la plantilla.
+    ultima = fila - 1
+    return ultima if ultima >= inicio else None
+
+
+def _es_subtotal_del_final(fila) -> bool:
+    """Fila que trae numeros pero ni sociedad ni cuenta identificable.
+
+    En un balance de SAP las columnas B y C llevan Sociedad y Cta.mayor;
+    una fila sin ninguna de esas dos pero con numeros mas adelante es un
+    subtotal calculado a mano en el papel del que salio el archivo. No es
+    un dato: es residuo del papel anterior.
+    """
+    if not fila or len(fila) < 3:
+        return False
+    b = fila[1] if len(fila) > 1 else None
+    c = fila[2] if len(fila) > 2 else None
+    if (b not in (None, "")) or (c not in (None, "")):
+        return False
+    return any(isinstance(v, (int, float)) for v in fila)
 
 
 def _detectar_encabezado(filas) -> int:
