@@ -49,6 +49,7 @@ def corrida(tmp_path_factory):
     registrar, para que las pruebas de abajo miren cada cosa por separado.
     """
     papeles = tmp_path_factory.mktemp("papeles")
+    encargos = tmp_path_factory.mktemp("encargos")
     registradas = []
 
     with pytest.MonkeyPatch.context() as mp:
@@ -59,6 +60,9 @@ def corrida(tmp_path_factory):
             mp.delenv(var, raising=False)
 
         mp.setattr(servidor, "_PAPELES", papeles)
+        mp.setattr(servidor, "_ENCARGOS", encargos)
+        mp.setattr(servidor.db, "crear_encargo", lambda _e, _u: None)
+        mp.setattr(servidor.db, "tocar_encargo", lambda _e, **k: None)
         mp.setattr(servidor.db, "abrir", lambda: None)
         mp.setattr(servidor.db, "cerrar", lambda: None)
         mp.setattr(servidor.db, "usuario_de_sesion", lambda _hash: USUARIO)
@@ -88,7 +92,8 @@ def corrida(tmp_path_factory):
     destino = tmp_path_factory.mktemp("api") / "papel.xlsx"
     destino.write_bytes(papel.content)
     return {"papel": destino, "cuerpo": cuerpo, "registradas": registradas,
-            "deposito": papeles, "respuesta_descarga": papel}
+            "deposito": papeles, "encargos": encargos,
+            "respuesta_descarga": papel}
 
 
 @pytest.fixture(scope="module")
@@ -149,11 +154,24 @@ def test_el_papel_queda_en_el_deposito_durable(corrida):
     assert esperado.exists()
 
 
-def test_los_documentos_del_cliente_no_se_quedan_en_el_servidor(corrida):
-    """Se guarda el papel, no la evidencia cruda. Fue una decision explicita:
-    son cifras de un cliente y no hay razon para acumularlas."""
-    trabajo = servidor._RAIZ / corrida["cuerpo"]["corrida"]
-    assert not trabajo.exists()
+def test_los_documentos_quedan_en_el_encargo(corrida):
+    """Se conservan a proposito, y esta prueba cambio de signo por eso.
+
+    Antes se borraban al terminar. Pero completar una revision -- agregar el
+    balance que falto, reemplazar un export mal hecho -- exige que sigan ahi:
+    si no, "completar" significaria volver a subir los seis documentos para
+    agregar uno.
+    """
+    carpeta = corrida["encargos"] / corrida["cuerpo"]["encargo"]
+    assert carpeta.exists()
+    nombres = {p.name for p in carpeta.iterdir()}
+    assert "auxiliar_2368.xlsx" in nombres
+    assert "borrador.pdf" in nombres
+
+
+def test_la_revision_queda_atada_a_su_encargo(corrida):
+    """Sin esto no se puede volver al encargo desde el historial."""
+    assert corrida["registradas"][0]["encargo"] == corrida["cuerpo"]["encargo"]
 
 
 def test_la_descarga_llega_con_nombre_archivable(corrida):

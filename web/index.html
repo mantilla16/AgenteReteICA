@@ -344,7 +344,10 @@ a.dl { display: inline-block; margin-top: 10px; text-decoration: none; }
         cada archivo por su estructura, no por el nombre.
         <input type="file" id="file" multiple class="hidden" accept=".pdf,.xlsx,.xls">
       </div>
-      <div class="files" id="files"></div>
+      <!-- El tablero: se llena a medida que cada documento sube y el motor lo
+           reconoce. Antes habia que esperar a que terminara la revision para
+           enterarse de que faltaba el balance. -->
+      <div class="panel" id="tablero" style="margin-top:14px"></div>
     </section>
 
     <section class="seccion">
@@ -413,6 +416,11 @@ a.dl { display: inline-block; margin-top: 10px; text-decoration: none; }
               Descargar papel de trabajo
             </button>
           </a>
+          <!-- Vuelve al MISMO encargo con sus documentos puestos: se agrega
+               el que falto, o se reemplaza uno mal exportado, y se revisa de
+               nuevo. Queda un registro aparte; el anterior no se pierde. -->
+          <button id="completar" class="btn btn-contorno no-imprimir"
+                  style="width:100%;justify-content:center">Agregar o corregir documentos</button>
           <button id="nueva" class="btn btn-contorno no-imprimir"
                   style="width:100%;justify-content:center">Nueva revision</button>
         </div>
@@ -449,7 +457,9 @@ a.dl { display: inline-block; margin-top: 10px; text-decoration: none; }
           </div>
 
           <div class="panel" style="margin-bottom:0">
-            <div class="rotulo" style="margin-bottom:10px">Los 16 controles</div>
+            <!-- El numero lo pone pintar(): decia 16 cuando el tablero ya
+                 mostraba 18, porque quedo escrito antes de IA-1 e IA-3. -->
+            <div class="rotulo" style="margin-bottom:10px" id="rotulo-controles">Los controles</div>
             <div class="tira" id="tira"></div>
             <div class="leyenda">
               <span><i style="background:var(--verde-vivo)"></i>paso</span>
@@ -525,15 +535,125 @@ function mostrarHoja(cual){
 document.querySelectorAll(".pestana").forEach(b =>
   b.onclick = () => mostrarHoja(b.dataset.hoja));
 
-let archivos = [];
+/* ================================================== EL ENCARGO
+   Cada documento se sube solo y el motor lo reconoce al llegar. La carpeta
+   sobrevive a la revision: se puede volver, agregar el balance que falto o
+   reemplazar un export mal hecho, y revisar otra vez. */
+
+let encargo = null;       // id de la carpeta viva
+let tablero = null;       // lo ultimo que dijo el motor sobre ella
+let subiendo = 0;
+
+async function asegurarEncargo(){
+  if(encargo) return encargo;
+  const r = await fetch(BASE + "/encargos", {method:"POST"});
+  const data = await leerRespuesta(r);
+  if(!r.ok) throw new Error(data.detail || "No se pudo abrir el encargo");
+  encargo = data.encargo;
+  pintarTablero(data);
+  return encargo;
+}
+
 const drop = $("#drop"), file = $("#file");
 drop.onclick = () => file.click();
 drop.ondragover = e => { e.preventDefault(); drop.classList.add("hover"); };
 drop.ondragleave = () => drop.classList.remove("hover");
 drop.ondrop = e => { e.preventDefault(); drop.classList.remove("hover"); add(e.dataTransfer.files); };
-file.onchange = () => add(file.files);
-function add(list){ for(const f of list) archivos.push(f); render(); }
-function render(){ $("#files").innerHTML = archivos.map(f=>`<span>${f.name.endsWith(".pdf")?"\u{1F4C4}":"\u{1F4CA}"} ${f.name}</span>`).join(""); }
+file.onchange = () => { add(file.files); file.value = ""; };
+
+async function add(lista){
+  try {
+    await asegurarEncargo();
+  } catch(e){ $("#msg").innerHTML = avisoError(e.message); return; }
+  // De a uno y en orden: asi cada archivo se reconoce apenas llega, y el
+  // tablero se mueve mientras los demas todavia suben.
+  for(const f of lista) await subirUno(f);
+}
+
+async function subirUno(archivo){
+  subiendo++;
+  pintarTablero(tablero, archivo.name);
+  try {
+    const fd = new FormData();
+    fd.append("archivo", archivo);
+    const r = await fetch(BASE + "/encargos/" + encargo + "/documentos",
+                          {method:"POST", body:fd});
+    const data = await leerRespuesta(r);
+    if(!r.ok){ $("#msg").innerHTML = avisoError(data.detail || "No se pudo subir " + archivo.name); }
+    else pintarTablero(data);
+  } catch(e){
+    $("#msg").innerHTML = avisoError(e.message || e);
+  } finally {
+    subiendo--;
+    pintarTablero(tablero);
+  }
+}
+
+async function quitarDocumento(nombre){
+  const r = await fetch(BASE + "/encargos/" + encargo + "/documentos/"
+                        + encodeURIComponent(nombre), {method:"DELETE"});
+  const data = await leerRespuesta(r);
+  if(r.ok) pintarTablero(data);
+}
+
+function avisoError(texto){
+  return `<div class="aviso error" style="margin-top:12px"><div class="cuerpo">${texto}</div></div>`;
+}
+
+/* El tablero dice tres cosas: que reconocio, que falta, y que controles se
+   van a perder si se revisa asi. Lo ultimo es lo que evita la sorpresa al
+   final. */
+function pintarTablero(data, subiendoAhora){
+  if(data) tablero = data;
+  const caja = $("#tablero");
+  if(!tablero){
+    caja.innerHTML = `<div class="rotulo">Arrastre el primer documento para empezar.</div>`;
+    return;
+  }
+
+  const filas = INSUMOS.map(([rol, nombre]) => {
+    const v = tablero.insumos[rol];
+    const hay = Array.isArray(v) ? v.length > 0 : !!v;
+    const detalle = Array.isArray(v) ? v.join(", ") : (v || "");
+    const controles = (CONTROLES_POR_INSUMO[rol] || []).join(", ");
+    return `<div class="insumo ${hay ? "si" : "no"}">
+      <span class="m">${hay ? "✓" : "✕"}</span>
+      <span><b>${nombre}</b>${detalle ? " · " + detalle : ""}${
+        !hay && controles ? ` <span style="opacity:.7">(sin esto: ${controles})</span>` : ""}</span>
+      ${hay && !Array.isArray(v) ? `<span style="margin-left:auto"><a href="#" data-quitar="${v}"
+        style="font-size:11px;color:var(--tinta-suave)">quitar</a></span>` : ""}
+    </div>`;
+  }).join("");
+
+  const pendiente = subiendo > 0
+    ? `<div class="rotulo" style="margin-top:10px">Reconociendo ${subiendoAhora || "documento"}…</div>` : "";
+
+  const sobran = (tablero.sin_clasificar || []).length
+    ? `<div class="aviso alerta" style="display:block;margin-top:12px"><div class="cuerpo">
+        El motor no reconocio: ${tablero.sin_clasificar.join(", ")}. No se usaran.
+       </div></div>` : "";
+
+  const choque = (tablero.conflictos || []).length
+    ? avisoError(tablero.conflictos.join("; ")) : "";
+
+  caja.innerHTML = filas + pendiente + sobran + choque;
+  caja.querySelectorAll("[data-quitar]").forEach(a => {
+    a.onclick = e => { e.preventDefault(); quitarDocumento(a.dataset.quitar); };
+  });
+
+  const boton = $("#run");
+  boton.disabled = !tablero.puede_revisar || subiendo > 0;
+  boton.textContent = tablero.controles_en_riesgo && tablero.controles_en_riesgo.length
+    ? "Revisar igual (sin " + tablero.controles_en_riesgo.join(", ") + ")"
+    : "Revisar y generar papel";
+}
+
+/* Los controles que dependen de cada insumo. Espejo del servidor, solo para
+   poder decirlo en el tablero sin otra vuelta. */
+const CONTROLES_POR_INSUMO = {
+  balance: ["C2"], erp: ["C3", "C5"], facturas: ["C6", "C11"],
+  formato_historico: ["C12", "C15"], pago_anterior: ["C12"],
+};
 
 const fmt = n => (n==null?"—":new Intl.NumberFormat("es-CO",{maximumFractionDigits:0}).format(n));
 
@@ -575,16 +695,31 @@ $("#nueva").onclick = () => {
   $("#res").classList.add("hidden");
   $("#preparar").classList.remove("hidden");
   $("#msg").innerHTML = "";
-  archivos = []; render();
+  // Encargo nuevo: otro cliente, otros documentos. Para AGREGAR algo a este
+  // mismo encargo esta "Completar" desde el historial.
+  encargo = null; tablero = null; pintarTablero();
+  window.scrollTo(0, 0);
+};
+
+/* Completar: el encargo sigue vivo con todo lo que ya se subio. */
+$("#completar").onclick = async () => {
+  if(!encargo){ return; }
+  const r = await fetch(BASE + "/encargos/" + encargo);
+  const data = await leerRespuesta(r);
+  if(!r.ok){ $("#msg").innerHTML = avisoError(data.detail || "No se pudo abrir el encargo"); return; }
+  pintarTablero(data);
+  $("#res").classList.add("hidden");
+  $("#preparar").classList.remove("hidden");
   window.scrollTo(0, 0);
 };
 
 $("#run").onclick = async () => {
   const msg = $("#msg"); msg.innerHTML = "";
-  if(archivos.length < 2){ msg.innerHTML = '<div class="aviso error" style="margin-top:12px"><div class="cuerpo">Suba al menos el borrador y el auxiliar 2368.</div></div>'; return; }
-  if(!$("#nit").value || !$("#periodo").value){ msg.innerHTML = '<div class="aviso error" style="margin-top:12px"><div class="cuerpo">NIT y periodo son obligatorios.</div></div>'; return; }
+  if(!encargo || !tablero || !tablero.puede_revisar){
+    msg.innerHTML = avisoError("Suba al menos el borrador y el auxiliar 2368."); return; }
+  if(!$("#nit").value || !$("#periodo").value){
+    msg.innerHTML = avisoError("NIT y periodo son obligatorios."); return; }
   const fd = new FormData();
-  archivos.forEach(f => fd.append("archivos", f));
   fd.append("nit", $("#nit").value);
   fd.append("periodo", $("#periodo").value);
   fd.append("municipio", $("#municipio").value);
@@ -593,10 +728,12 @@ $("#run").onclick = async () => {
   // que pedirle al auditor.
   $("#run").disabled = true; $("#run").textContent = "Procesando…";
   try {
-    const r = await fetch(BASE + "/analizar", { method:"POST", body:fd });
+    const r = await fetch(BASE + "/encargos/" + encargo + "/revisar",
+                          { method:"POST", body:fd });
     const data = await leerRespuesta(r);
     if(!r.ok){ msg.innerHTML = `<div class="aviso error" style="margin-top:12px"><div class="cuerpo">${data.detail||"Error"}</div></div>`; return; }
     pintar(data);
+    $("#completar").style.display = "";
     // El papel esta hecho y se puede descargar; lo que fallo es la fila del
     // historial. Se dice, porque si no, manana esa revision no aparece y
     // nadie sabe por que.
@@ -678,6 +815,7 @@ function pintar(data){
       <td>${h.descripcion}</td><td class="cifra">${h.impacto ? fmt(h.impacto) : "\u2014"}</td></tr>`).join("")}</tbody>` : "";
 
   // ------------------------------------------------- la tira de controles
+  $("#rotulo-controles").textContent = "Los " + R.controles.length + " controles";
   $("#tira").innerHTML = R.controles.map(ctl => `
     <div class="celda" title="${ctl.codigo}: ${ctl.nombre} — ${ctl.estado}">
       <span class="c">${ctl.codigo}</span>
@@ -775,6 +913,10 @@ async function abrirRevision(corrida){
   $("#nit").value = data.nit || "";
   $("#periodo").value = data.periodo || "";
   $("#declarado_por").value = data.declarado_por || "";
+  // Retomar el encargo es lo que habilita "Agregar o corregir documentos"
+  // sobre una revision vieja. Las de antes de los encargos no lo tienen.
+  encargo = data.encargo || null;
+  $("#completar").style.display = encargo ? "" : "none";
   pintar({resumen: data.resumen, descarga: data.descarga, corrida: data.corrida});
   if(!data.papel_disponible){
     $("#msg").innerHTML = `<div class="aviso alerta" style="margin-top:12px"><div class="cuerpo">El registro existe pero el archivo del papel ya no esta en el servidor.</div></div>`;
@@ -798,6 +940,7 @@ async function cargarClientes(){
 $("#filtro-cliente").onchange = cargarHistorial;
 $("#recargar").onclick = () => { cargarClientes(); cargarHistorial(); };
 
+pintarTablero();
 cargarClientes();
 cargarHistorial();
 </script>

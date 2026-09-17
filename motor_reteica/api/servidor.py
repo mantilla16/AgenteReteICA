@@ -11,8 +11,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import shutil
-import tempfile
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -50,14 +48,11 @@ app = FastAPI(title="Motor de Revision de ReteICA", version=__version__)
 
 MUNICIPIOS = {"santa_marta": MUNICIPIO}
 
-_RAIZ = Path(tempfile.gettempdir()) / "motor_reteica_web"
-_RAIZ.mkdir(exist_ok=True)
 _WEB = ruta_recurso("web")
 
-# Los papeles NO pueden vivir en /tmp: el sistema lo limpia solo y lo borra al
-# reiniciar, y el historial quedaria lleno de filas apuntando a archivos que ya
-# no estan. _RAIZ sigue siendo el area de trabajo de una corrida (los documentos
-# que sube el auditor, que se descartan al terminar); esto es el archivo.
+# Nada de esto puede vivir en /tmp: el sistema lo limpia solo y lo borra al
+# reiniciar. Los papeles quedan archivados, y los documentos del encargo se
+# conservan para poder completarlo o corregirlo despues.
 _PAPELES = Path(os.getenv("RETEICA_PAPELES", "/var/lib/reteica/papeles"))
 
 # La corrida es uuid4().hex[:12]. Se valida antes de tocar el disco: el id
@@ -65,9 +60,82 @@ _PAPELES = Path(os.getenv("RETEICA_PAPELES", "/var/lib/reteica/papeles"))
 _RE_CORRIDA = re.compile(r"^[0-9a-f]{12}$")
 
 
+# Los documentos del encargo se conservan: sobre un mismo encargo se revisa
+# varias veces, agregando lo que falto o corrigiendo un archivo mal exportado.
+_ENCARGOS = Path(os.getenv("RETEICA_ENCARGOS", "/var/lib/reteica/encargos"))
+
+# Que controles dependen de cada insumo. Sirve para decirle al auditor, ANTES
+# de correr, que va a perder si sigue sin ese documento -- en vez de que lo
+# descubra diez minutos despues leyendo la conclusion.
+CONTROLES_POR_INSUMO = {
+    "balance":           ("C2",),
+    "erp":               ("C3", "C5"),
+    "facturas":          ("C6", "C11"),
+    "formato_historico": ("C12", "C15"),
+    "pago_anterior":     ("C12",),
+}
+
+OBLIGATORIOS = ("borrador", "auxiliar")
+
+NOMBRE_INSUMO = {
+    "borrador":          "Borrador de la declaracion",
+    "auxiliar":          "Auxiliar 2368",
+    "balance":           "Balance de prueba",
+    "erp":               "Reporte de retenciones del ERP",
+    "facturas":          "Facturas fuente",
+    "pago_anterior":     "Declaracion y pago del mes anterior",
+    "formato_historico": "Formato historico del cliente",
+}
+
+
 def _deposito_papeles() -> Path:
     _PAPELES.mkdir(parents=True, exist_ok=True)
     return _PAPELES
+
+
+def _carpeta_encargo(enc: str) -> Path:
+    if not _RE_CORRIDA.match(enc or ""):
+        raise HTTPException(404, "Ese encargo no existe.")
+    return _ENCARGOS / enc
+
+
+def _exigir_encargo(enc: str, request: Request) -> Path:
+    """La carpeta del encargo, solo si es de quien la pide."""
+    if db.encargo_de(enc, request.state.usuario["id"]) is None:
+        raise HTTPException(404, "Ese encargo no existe o no es suyo.")
+    return _carpeta_encargo(enc)
+
+
+def _tablero(carpeta: Path) -> dict:
+    """Que reconocio el motor en lo que va subido, y que falta.
+
+    Es la misma clasificacion que corre la revision, solo que ahora se hace
+    al subir cada archivo y no al final: el auditor ve el tablero llenarse en
+    vez de esperar diez minutos para descubrir que le faltaba el balance.
+    """
+    rutas = sorted(p for p in carpeta.iterdir()
+                   if p.is_file() and p.name != NOMBRE_ARCHIVO)
+    roles, facturas, sin_clasificar, conflictos = _clasificar(rutas)
+
+    presentes = {r for r, v in roles.items() if v}
+    if facturas:
+        presentes.add("facturas")
+
+    faltan = [r for r in NOMBRE_INSUMO if r not in presentes]
+    en_riesgo = sorted({c for r in faltan
+                        for c in CONTROLES_POR_INSUMO.get(r, ())})
+
+    return {
+        "insumos": {**roles, "facturas": facturas or None},
+        "facturas": facturas,
+        "sin_clasificar": sin_clasificar,
+        "conflictos": conflictos,
+        "faltan": faltan,
+        "faltan_obligatorios": [r for r in OBLIGATORIOS if r not in presentes],
+        "controles_en_riesgo": en_riesgo,
+        "puede_revisar": not conflictos and all(r in presentes
+                                                for r in OBLIGATORIOS),
+    }
 
 
 def _ruta_papel(corr: str) -> Path | None:
@@ -391,24 +459,112 @@ async def analizar(
     municipio: str = Form("santa_marta"),
     declarado_por: str = Form(""), api_key: str = Form(""),
 ):
+    """Camino de un solo golpe: sube todo y revisa.
+
+    Se conserva porque es una API util por si sola, pero la pantalla ya no lo
+    usa: ahora los documentos se suben uno a uno a un encargo, que ademas
+    sobrevive a la revision para poder completarlo.
+    """
+    enc = _nuevo_encargo(request)
+    carpeta = _carpeta_encargo(enc)
+    for subida in archivos:
+        nombre = Path(subida.filename or "archivo").name
+        (carpeta / nombre).write_bytes(await subida.read())
+
+    return await _revisar_encargo(
+        request, enc, nit=nit, periodo=periodo, municipio=municipio,
+        declarado_por=declarado_por, api_key=api_key)
+
+
+# --------------------------------------------------------------------------
+# Encargos: la carpeta viva del cliente
+# --------------------------------------------------------------------------
+
+def _nuevo_encargo(request: Request) -> str:
+    enc = uuid.uuid4().hex[:12]
+    _carpeta_encargo(enc).mkdir(parents=True, exist_ok=True)
+    db.crear_encargo(enc, request.state.usuario["id"])
+    return enc
+
+
+@app.post("/encargos")
+def abrir_encargo(request: Request) -> dict:
+    enc = _nuevo_encargo(request)
+    return {"encargo": enc, **_tablero(_carpeta_encargo(enc))}
+
+
+@app.get("/encargos/{enc}")
+def ver_encargo(enc: str, request: Request) -> dict:
+    fila = db.encargo_de(enc, request.state.usuario["id"])
+    if fila is None:
+        raise HTTPException(404, "Ese encargo no existe o no es suyo.")
+    datos = _fila_json(fila)
+    datos["encargo"] = enc
+    datos.update(_tablero(_carpeta_encargo(enc)))
+    datos["revisiones"] = [_fila_json(r)
+                           for r in db.revisiones_del_encargo(enc)]
+    return datos
+
+
+@app.post("/encargos/{enc}/documentos")
+async def subir_documento(enc: str, request: Request,
+                          archivo: UploadFile = File(...)) -> dict:
+    """Un documento a la vez: se guarda, se clasifica y se devuelve el tablero.
+
+    Subir de a uno es lo que permite reconocerlo al instante. Un archivo con
+    el mismo nombre REEMPLAZA al anterior: asi se corrige un export mal hecho
+    sin tener que empezar de cero.
+    """
+    carpeta = _exigir_encargo(enc, request)
+    nombre = Path(archivo.filename or "archivo").name
+    if not nombre or nombre.startswith("~$"):
+        raise HTTPException(400, "Ese archivo no es un documento (%s)." % nombre)
+    (carpeta / nombre).write_bytes(await archivo.read())
+    db.tocar_encargo(enc)
+    tablero = _tablero(carpeta)
+    tablero["encargo"] = enc
+    tablero["subido"] = nombre
+    return tablero
+
+
+@app.delete("/encargos/{enc}/documentos/{nombre}")
+def quitar_documento(enc: str, nombre: str, request: Request) -> dict:
+    carpeta = _exigir_encargo(enc, request)
+    ruta = carpeta / Path(nombre).name
+    if not ruta.exists() or not ruta.is_file():
+        raise HTTPException(404, "Ese documento no esta en el encargo.")
+    ruta.unlink()
+    db.tocar_encargo(enc)
+    return {"encargo": enc, **_tablero(carpeta)}
+
+
+@app.post("/encargos/{enc}/revisar")
+async def revisar_encargo(
+    enc: str, request: Request,
+    nit: str = Form(...), periodo: str = Form(...),
+    municipio: str = Form("santa_marta"),
+    declarado_por: str = Form(""), api_key: str = Form(""),
+):
+    _exigir_encargo(enc, request)
+    return await _revisar_encargo(
+        request, enc, nit=nit, periodo=periodo, municipio=municipio,
+        declarado_por=declarado_por, api_key=api_key)
+
+
+async def _revisar_encargo(request: Request, enc: str, *, nit: str,
+                           periodo: str, municipio: str, declarado_por: str,
+                           api_key: str):
     if municipio not in MUNICIPIOS:
         raise HTTPException(400, "Municipio no soportado: %s" % municipio)
 
-    corr = uuid.uuid4().hex[:12]
-    carpeta = _RAIZ / corr
-    carpeta.mkdir(exist_ok=True)
-
-    rutas = []
-    for subida in archivos:
-        destino = carpeta / (subida.filename or "archivo_%d" % len(rutas))
-        destino.write_bytes(await subida.read())
-        rutas.append(destino)
-
+    carpeta = _carpeta_encargo(enc)
+    rutas = sorted(p for p in carpeta.iterdir()
+                   if p.is_file() and p.name != NOMBRE_ARCHIVO)
     archivos_por_rol, facturas, sin_clasificar, conflictos = _clasificar(rutas)
     if conflictos:
-        shutil.rmtree(carpeta, ignore_errors=True)
         raise HTTPException(400, "; ".join(conflictos))
 
+    corr = uuid.uuid4().hex[:12]
     manifiesto = {
         "nit": nit, "periodo": periodo, "municipio": MUNICIPIOS[municipio].nombre,
         "declarado_por": declarado_por or "sin declarar",
@@ -436,12 +592,11 @@ async def analizar(
             AtestacionInvalida, FileNotFoundError) as error:
         raise HTTPException(400, str(error))
 
-    # El papel va al archivo permanente; el area de trabajo se descarta con
-    # todo lo que el auditor subio. Se guarda el papel, no la evidencia cruda:
-    # son cifras de clientes y no hay razon para acumularlas en el servidor.
+    # El papel va al archivo permanente. La carpeta del encargo NO se borra:
+    # es lo que permite volver, agregar el balance que faltaba o reemplazar un
+    # archivo mal exportado, y revisar otra vez sin subirlo todo de nuevo.
     salida = _deposito_papeles() / ("%s.xlsx" % corr)
     depositar(ctx, salida)
-    shutil.rmtree(carpeta, ignore_errors=True)
 
     resumen = _resumen(ctx)
     resumen["sin_clasificar"] = sin_clasificar
@@ -457,14 +612,20 @@ async def analizar(
             razon_social=resumen.get("razon_social"), periodo=periodo,
             municipio=MUNICIPIOS[municipio].nombre,
             declarado_por=declarado_por or None, resumen=resumen,
-            ruta_papel=str(salida))
+            ruta_papel=str(salida), encargo=enc)
+        db.tocar_encargo(enc, nit=nit, periodo=periodo,
+                         municipio=MUNICIPIOS[municipio].nombre,
+                         declarado_por=declarado_por,
+                         razon_social=resumen.get("razon_social"))
     except Exception as error:
         registrada = False
         print("[revision] no se pudo registrar %s: %s" % (corr, error),
               flush=True)
 
-    return {"corrida": corr, "descarga": "/descargar/%s" % corr,
-            "resumen": resumen, "registrada": registrada}
+    return {"corrida": corr, "encargo": enc,
+            "descarga": "/descargar/%s" % corr,
+            "resumen": resumen, "registrada": registrada,
+            "tablero": _tablero(carpeta)}
 
 
 # --------------------------------------------------------------------------

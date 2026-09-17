@@ -23,7 +23,7 @@ sudo mkdir -p $APP_DIR
 sudo mkdir -p $LOG_DIR
 # Los papeles de trabajo. NO en /tmp: el sistema lo limpia solo y lo borra al
 # reiniciar, y el historial quedaria apuntando a archivos que ya no estan.
-sudo mkdir -p /var/lib/reteica/papeles
+sudo mkdir -p /var/lib/reteica/papeles /var/lib/reteica/encargos
 
 # 3. Copiar archivos del proyecto
 echo "Copiando archivos del proyecto..."

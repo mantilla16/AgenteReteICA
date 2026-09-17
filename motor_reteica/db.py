@@ -172,18 +172,18 @@ def consumir_codigo(codigo_id: int) -> None:
 def guardar_revision(corrida: str, usuario_id: str, nit: str,
                      razon_social: str | None, periodo: str, municipio: str,
                      declarado_por: str | None, resumen: dict,
-                     ruta_papel: str) -> None:
+                     ruta_papel: str, encargo: str | None = None) -> None:
     semaforo = (resumen.get("semaforo") or {}).get("color")
     ejecutar(
         """INSERT INTO reteica.revision
              (corrida, usuario_id, nit, razon_social, periodo, municipio,
               declarado_por, semaforo, conclusion, impacto_total,
-              puede_concluir_limpio, resumen, ruta_papel)
-           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+              puede_concluir_limpio, resumen, ruta_papel, encargo)
+           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
         (corrida, usuario_id, nit, razon_social, periodo, municipio,
          declarado_por, semaforo, resumen.get("conclusion"),
          resumen.get("impacto_total"), resumen.get("puede_concluir_limpio"),
-         json.dumps(resumen, default=str), ruta_papel),
+         json.dumps(resumen, default=str), ruta_papel, encargo),
     )
 
 
@@ -215,6 +215,41 @@ def revision_de(corrida: str, usuario_id: str) -> dict | None:
         """SELECT * FROM reteica.revision
             WHERE corrida=%s AND usuario_id=%s""",
         (corrida, usuario_id))
+
+
+# =====================================================================
+# ENCARGOS
+# =====================================================================
+#
+# El encargo es la carpeta viva: sus documentos se conservan y se pueden
+# completar o corregir despues, incluso si la revision ya salio bien.
+
+def crear_encargo(encargo_id: str, usuario_id: str) -> None:
+    ejecutar("INSERT INTO reteica.encargo (id, usuario_id) VALUES (%s,%s)",
+             (encargo_id, usuario_id))
+
+
+def encargo_de(encargo_id: str, usuario_id: str) -> dict | None:
+    return uno("""SELECT * FROM reteica.encargo
+                   WHERE id=%s AND usuario_id=%s""",
+               (encargo_id, usuario_id))
+
+
+def tocar_encargo(encargo_id: str, **campos) -> None:
+    """Guarda lo ultimo que se sabe del encargo (NIT, periodo, razon social)."""
+    campos = {k: v for k, v in campos.items() if v}
+    sets = "".join(", %s=%%s" % k for k in campos)
+    ejecutar("UPDATE reteica.encargo SET actualizado_en=now()%s WHERE id=%%s"
+             % sets, (*campos.values(), encargo_id))
+
+
+def revisiones_del_encargo(encargo_id: str) -> list[dict]:
+    return varios(
+        """SELECT corrida, creado_en, semaforo, impacto_total,
+                  puede_concluir_limpio
+             FROM reteica.revision WHERE encargo=%s
+            ORDER BY creado_en DESC""",
+        (encargo_id,))
 
 
 def clientes_de(usuario_id: str) -> list[dict]:
