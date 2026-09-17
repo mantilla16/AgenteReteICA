@@ -101,10 +101,13 @@ def test_el_balance_termina_donde_termina_la_evidencia(libro):
     deposita el motor como valor.
     """
     hoja = libro["BALANCE"]
+    # Se mira si la fila trae ALGO, no si trae cuenta: el balance del cliente
+    # termina en filas de total, que legitimamente no llevan numero de cuenta.
+    # Exigir cuenta en la ultima fila recortaria los totales del documento.
     con_dato = [f for f in range(5, hoja.max_row + 1)
-                if hoja.cell(row=f, column=3).value]
+                if any(c.value is not None for c in hoja[f])]
     assert hoja.max_row == max(con_dato), (
-        "la hoja llega hasta la fila %d y la ultima cuenta esta en la %d"
+        "la hoja llega hasta la fila %d y el ultimo dato esta en la %d"
         % (hoja.max_row, max(con_dato)))
     ocultas = [f for f in range(1, hoja.max_row + 1)
                if hoja.row_dimensions[f].hidden]
@@ -129,10 +132,10 @@ def test_la_cuenta_excluida_se_ve_con_la_cifra_que_la_delata(libro, contexto):
     for cuenta in contexto.candidatas_sin_declarar:
         assert cuenta in filas, "la cuenta excluida %s no esta en el papel" % cuenta
         fila = filas[cuenta]
-        assert "EXCLUIDA" in str(hoja.cell(row=fila, column=4).value)
-        assert hoja.cell(row=fila, column=10).value == int(contexto.acumulados[cuenta])
-        assert hoja.cell(row=fila, column=9).value is None, (
-            "una cuenta excluida no puede traer cifra en la columna que se cruza")
+        # La exclusion se declara en la columna del motor. La fila trae ahora
+        # las cifras del balance del cliente, sin tocar: es la evidencia por
+        # la que el motor la senala, y antes no se podia ver.
+        assert "EXCLUIDA" in str(hoja.cell(row=fila, column=11).value)
 
 
 def test_el_saldo_acumulado_llega_al_papel(libro, contexto):

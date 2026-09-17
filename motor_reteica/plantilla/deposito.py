@@ -196,6 +196,14 @@ def _depositar_balance(libro, ctx) -> None:
     inicio, fin = _BALANCE[1], _BALANCE[2]
     _limpiar(hoja, inicio, fin, range(2, 11))
 
+    # El papel de trabajo ES la evidencia: esta hoja transcribe el balance
+    # COMPLETO tal como lo entrego el cliente, no el extracto de la 2368 que
+    # usan los cruces. Asi el que revisa puede comprobar a mano el saldo que
+    # el motor tomo, sin salir del papel -- que es justo lo que hace el
+    # auditor cuando lo arma a mano.
+    if _transcribir_balance(hoja, ctx, inicio, fin):
+        return
+
     hoja.cell(row=3, column=2,
               value="EXTRACTO de la cuenta 2368 del balance de prueba. No es "
                     "el balance completo: el motor solo verifica esas "
@@ -241,6 +249,126 @@ def _depositar_balance(libro, ctx) -> None:
         fila += 1
 
     _recortar(hoja, fila, fin)
+
+
+def _transcribir_balance(hoja, ctx, inicio: int, fin: int) -> bool:
+    """Vuelca el balance de prueba COMPLETO, tal como vino.
+
+    No interpreta columnas: copia las que traiga el archivo, en su orden y
+    con sus propias etiquetas. Los clientes no exportan todos igual, y el
+    papel tiene que mostrar el documento que se recibio -- no una version
+    normalizada de el, que ya no seria evidencia de nada.
+
+    Lo unico que se detecta es DONDE empieza el encabezado, y para eso se usa
+    el mismo localizador que ya usa la ingesta: si el motor supo leer ese
+    archivo, sabe donde arranca.
+
+    Devuelve False si no hay balance o no se pudo leer, para que el llamador
+    caiga al extracto de siempre en vez de dejar la hoja vacia.
+    """
+    ruta = (ctx.rutas or {}).get("balance")
+    if not ruta:
+        return False
+
+    try:
+        from motor_reteica.ingesta._io import leer_filas
+        from motor_reteica.parametros.columnas import (FIRMA_BALANCE,
+                                                       ROLES_BALANCE,
+                                                       localizar_columnas)
+        filas = leer_filas(ruta, hoja="BALANCE")
+        encabezado, col = localizar_columnas(filas, ROLES_BALANCE,
+                                             FIRMA_BALANCE)
+    except Exception:
+        # Que el papel no se caiga por la hoja de evidencia: el motor ya hizo
+        # su trabajo y el extracto sigue siendo una salida valida.
+        return False
+
+    datos = [f for f in filas[encabezado + 1:] if any(
+        c not in (None, "") for c in f)]
+    if not datos:
+        return False
+
+    # Transcribir 349 filas sin decir nada daria a entender que el motor las
+    # reviso todas. Se transcriben COMO EVIDENCIA; lo que el motor verifico
+    # queda marcado cuenta por cuenta en la columna LECTURA DEL MOTOR.
+    hoja.cell(row=3, column=2,
+              value="Balance de prueba COMPLETO, transcrito como lo entrego "
+                    "el cliente: es la EVIDENCIA, no una seleccion. El motor "
+                    "solo verifica las cuentas 2368 -- las demas filas estan "
+                    "aqui para poder comprobar los saldos, no porque se hayan "
+                    "revisado. La columna LECTURA DEL MOTOR dice, cuenta por "
+                    "cuenta, cual entro a los cruces y cual no. La cifra que "
+                    "se cruza es 'Saldo Haber per.inf.' (el movimiento del "
+                    "periodo); el acumulado arrastra meses anteriores.")
+
+    _escribir_fila(hoja, inicio - 1, filas[encabezado])
+    hoja.cell(row=inicio - 1, column=_NOTA, value="LECTURA DEL MOTOR")
+
+    columna_cuenta = col["cuenta"]
+    fila = inicio
+    for origen in datos:
+        if fila > fin:
+            hoja.cell(row=fin, column=2,
+                      value="TRUNCADO: el balance trae mas filas de las que "
+                            "caben en esta hoja (%d)." % len(datos))
+            break
+        hoja.row_dimensions[fila].hidden = False
+        _escribir_fila(hoja, fila, origen)
+
+        # La fuente se transcribe intacta; lo que el motor tenga que decir
+        # sobre una cuenta va A LA DERECHA, en una columna propia. Antes esta
+        # anotacion ocupaba el lugar del dato y por eso habia que elegir entre
+        # mostrar la evidencia o explicarla.
+        cuenta = _texto_cuenta(origen, columna_cuenta)
+        if cuenta:
+            nota = _nota_de_cuenta(ctx, cuenta)
+            if nota:
+                hoja.cell(row=fila, column=_NOTA, value=nota)
+        fila += 1
+
+    _recortar(hoja, fila, fin)
+    return True
+
+
+# Columna donde el motor anota su lectura, despues de las diez que puede
+# traer el balance. La fuente no se toca.
+_NOTA = 11
+
+
+def _texto_cuenta(origen, indice) -> str:
+    if indice is None or indice >= len(origen):
+        return ""
+    valor = origen[indice]
+    return str(valor).strip() if valor is not None else ""
+
+
+def _nota_de_cuenta(ctx, cuenta: str) -> str:
+    """Que dice el motor sobre esta cuenta del balance, si dice algo."""
+    if cuenta in ctx.candidatas_sin_declarar:
+        return ("EXCLUIDA de los cruces: saldo de naturaleza debito, tratada "
+                "como contrapartida de pago. Sin atestacion que lo respalde, "
+                "el motor no la cruza (C13).")
+    if ctx.saldos and cuenta in ctx.saldos:
+        tarifa = ctx.municipio.tarifa_por_cuenta.get(cuenta, 0)
+        return "CRUZADA por C2 — %s" % _texto_de_cuenta(tarifa)
+    return ""
+
+
+def _escribir_fila(hoja, fila: int, valores) -> None:
+    """Copia una fila del origen columna por columna, sin reordenar.
+
+    El origen ya trae su propia columna A (vacia en los export de SAP), asi
+    que se copia posicion por posicion: A va a A y B va a B. Desplazarlo una
+    columna dejaba el 'Soc.' bajo el encabezado 'Cta.mayor' y todo el balance
+    corrido, que es peor que no traerlo.
+    """
+    for desplazamiento, valor in enumerate(valores):
+        columna = 1 + desplazamiento
+        if columna > 10:          # la hoja de la plantilla llega hasta J
+            break
+        celda = hoja.cell(row=fila, column=columna)
+        if _escribible(celda):
+            celda.value = valor
 
 
 def _recortar(hoja, desde: int, hasta: int) -> None:

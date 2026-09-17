@@ -71,6 +71,11 @@ class ContextoRevision:
     # Saldo acumulado de cada cuenta 2368, SOLO para mostrarlo en el papel.
     # No entra en ningun cruce: arrastra los periodos anteriores.
     acumulados: dict = field(default_factory=dict)
+    # Donde quedo cada documento que se uso. El papel de trabajo ES la
+    # evidencia, asi que las hojas de insumo transcriben la fuente COMPLETA;
+    # para eso hay que poder volver a leerla al depositar. Nada de esto entra
+    # en un cruce: los cruces ya se hicieron con lo que leyo la ingesta.
+    rutas: dict = field(default_factory=dict)
 
 
 _TOLERANCIA_REDONDEO = Decimal("1000")
@@ -323,4 +328,5 @@ def revisar(carpeta, nit, periodo, municipio,
         atestacion=atestacion,
         candidatas_sin_declarar=frozenset(candidatas_sin_declarar),
         acumulados=acumulados,
+        rutas=dict(rutas),
     )

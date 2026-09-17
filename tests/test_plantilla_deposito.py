@@ -109,13 +109,22 @@ def test_balance_recibe_las_cuentas_2368(papel):
     assert filas.get("2368010010") == 438243
 
 
-def test_el_balance_dice_que_es_un_extracto_y_no_el_balance_completo(papel):
-    """El motor solo valida las cuentas 2368: depositar 349 filas que nunca
-    miro daria a entender que las reviso."""
+def test_el_balance_distingue_evidencia_de_lo_verificado(papel):
+    """Cambio de forma, no de exigencia.
+
+    Antes la hoja traia solo las 2368 y se rotulaba EXTRACTO, porque
+    depositar 349 filas que el motor nunca miro daria a entender que las
+    reviso. Ahora se transcribe el balance COMPLETO --el papel de trabajo es
+    la evidencia, y sin ella el lector no puede comprobar ningun saldo-- asi
+    que la distincion tiene que hacerla el texto: se dice que solo las 2368
+    se verifican, y la columna LECTURA DEL MOTOR lo marca cuenta por cuenta.
+    """
     hoja = papel["BALANCE"]
     texto = " ".join(str(c.value) for fila in hoja.iter_rows(max_row=4)
-                     for c in fila if c.value is not None)
-    assert "EXTRACTO" in texto.upper()
+                     for c in fila if c.value is not None).upper()
+    assert "EVIDENCIA" in texto
+    assert "SOLO VERIFICA LAS CUENTAS 2368" in texto
+    assert "LECTURA DEL MOTOR" in texto
 
 
 # --------------------------------------------------------------------------
@@ -194,20 +203,20 @@ def test_el_texto_de_la_cuenta_muestra_el_porcentaje_no_los_digitos(papel):
     assert textos == {"Impuest ICA Reten 7%", "Impuest ICA Reten 10%"}, textos
 
 
-def test_el_balance_tambien_muestra_el_porcentaje(papel):
-    """Solo las cuentas que entran a los cruces.
+def test_la_nota_del_motor_dice_la_tarifa_de_lo_que_cruzo(papel):
+    """La tarifa sigue estando, ahora en la columna del motor.
 
-    La hoja muestra ademas las EXCLUIDAS, y el texto de esas dice por que se
-    excluyeron, no su tarifa: una tarifa junto a una cuenta que no se cruzo
-    daria a entender que si se verifico.
+    Y solo sobre las cuentas que entraron al cruce: una tarifa junto a una
+    cuenta que no se verifico daria a entender que si. Esa exigencia no
+    cambio, cambio el lugar -- la columna 4 ahora trae el texto del cliente,
+    porque la fuente se transcribe intacta.
     """
     hoja = papel["BALANCE"]
-    textos = [hoja.cell(row=f, column=4).value for f in range(5, 11)
-              if hoja.cell(row=f, column=4).value
-              and not str(hoja.cell(row=f, column=4).value).startswith("EXCLUIDA")]
-    assert textos, "no quedo ninguna cuenta en el cruce"
-    assert all("%" in t for t in textos), textos
-    assert not any("00" in t.split()[-1] for t in textos), textos
+    cruzadas = [hoja.cell(row=f, column=11).value
+                for f in range(5, hoja.max_row + 1)
+                if str(hoja.cell(row=f, column=11).value or "").startswith("CRUZADA")]
+    assert cruzadas, "no quedo ninguna cuenta marcada como cruzada"
+    assert all("%" in t for t in cruzadas), cruzadas
 
 
 def test_el_nit_de_la_caratula_lleva_digito_de_verificacion(papel):
