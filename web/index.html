@@ -472,6 +472,24 @@ const BASE = (() => {
   return p.endsWith("/") ? p.slice(0, -1) : p.substring(0, p.lastIndexOf("/"));
 })();
 
+// La API responde JSON, pero no todo lo que llega viene de la API: nginx
+// contesta en HTML (413 si el archivo excede el limite, 502 si el servicio
+// esta caido, 504 si la revision tardo mas que su timeout) y uvicorn contesta
+// en texto plano ante una falla interna. Parsear eso como JSON solo produce un
+// SyntaxError que tapa la causa. Aqui se lee el cuerpo tal cual y se traduce.
+async function leerRespuesta(r) {
+  const cuerpo = await r.text();
+  try {
+    return JSON.parse(cuerpo);
+  } catch {
+    if (cuerpo.trimStart().startsWith("<")) {
+      return {detail: `El servidor web respondio ${r.status} (no la aplicacion). `
+                    + `Revise el log de nginx.`};
+    }
+    return {detail: cuerpo.trim() || `Error ${r.status} del servidor.`};
+  }
+}
+
 $("#cerrar").onclick = async () => {
   if(!confirm("¿Cerrar sesion?")) return;
   try { await fetch(BASE + "/salir"); } catch(e){}
@@ -558,7 +576,7 @@ $("#run").onclick = async () => {
   $("#run").disabled = true; $("#run").textContent = "Procesando…";
   try {
     const r = await fetch(BASE + "/analizar", { method:"POST", body:fd });
-    const data = await r.json();
+    const data = await leerRespuesta(r);
     if(!r.ok){ msg.innerHTML = `<div class="aviso error" style="margin-top:12px"><div class="cuerpo">${data.detail||"Error"}</div></div>`; return; }
     pintar(data);
   } catch(e){ msg.innerHTML = `<div class="aviso error" style="margin-top:12px"><div class="cuerpo">${e}</div></div>`; }
