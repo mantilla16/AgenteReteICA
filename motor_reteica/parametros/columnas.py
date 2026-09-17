@@ -62,11 +62,23 @@ FIRMA_AUXILIAR = ("Cuenta", "Importe en ML")
 FIRMA_BALANCE = ("Cta.mayor", "Saldo Haber per.inf.")
 FIRMA_ERP = ("Acreedor", "Importe qst en MI")
 
-FIRMAS_POR_TIPO = {
-    "auxiliar": FIRMA_AUXILIAR,
-    "balance": FIRMA_BALANCE,
-    "erp": FIRMA_ERP,
+# Firmas alternativas por tipo. Cada cliente puede exportar con la
+# transaccion que quiera; se acepta la primera que coincida. El primer
+# elemento es la firma "rica" (con cuenta contable por linea, que habilita
+# los cruces por renglon); las demas son formatos AGREGADOS: solo permiten
+# el cruce universal del total, no los cruces por cuenta.
+FIRMAS_ALTERNATIVAS = {
+    "auxiliar": [
+        FIRMA_AUXILIAR,                              # TERLICA (FBL3N SAP)
+        ("Asignación", "Importe en moneda local"),   # Agroingenium (FAGLL03H)
+        ("Asignacion", "Importe en moneda local"),   # sin tilde
+    ],
+    "balance": [FIRMA_BALANCE],
+    "erp": [FIRMA_ERP],
 }
+
+FIRMAS_POR_TIPO = {tipo: firmas[0]
+                   for tipo, firmas in FIRMAS_ALTERNATIVAS.items()}
 
 # --------------------------------------------------------------------------
 # Roles semanticos por documento. El primer sinonimo es el que ya se
@@ -169,12 +181,16 @@ def localizar_columnas(filas, roles: dict, firma: tuple):
 def detectar_tipo_documento(filas):
     """1.5: identifica que tipo de documento es un archivo por su firma.
 
-    Devuelve 'auxiliar', 'balance', 'erp' o None si ninguna firma conocida
-    coincide con ninguna fila del archivo.
+    Devuelve 'auxiliar', 'balance', 'erp' o None. Cada tipo puede tener
+    varias firmas -- clientes distintos exportan con transacciones distintas
+    de SAP -- y la primera que coincida gana. Ese orden importa: la firma
+    rica (con cuenta por linea) va primero para preferir el auxiliar que
+    permite cruces por renglon sobre el que solo permite el cruce del total.
     """
     for indice, fila in enumerate(filas):
         etiquetas = _fila_a_etiquetas(fila)
-        for tipo, firma in FIRMAS_POR_TIPO.items():
-            if all(marca in etiquetas for marca in firma):
-                return tipo
+        for tipo, firmas in FIRMAS_ALTERNATIVAS.items():
+            for firma in firmas:
+                if all(marca in etiquetas for marca in firma):
+                    return tipo
     return None
