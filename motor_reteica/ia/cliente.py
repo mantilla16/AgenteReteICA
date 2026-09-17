@@ -38,6 +38,12 @@ MODELO_LOCAL_POR_DEFECTO = "qwen2.5:3b-instruct"
 URL_LOCAL_POR_DEFECTO    = "http://127.0.0.1:11434"
 _TIMEOUT_LOCAL_POR_DEFECTO = 600.0
 
+# El techo de salida NO puede ser el mismo que contra la nube. Lo que se le
+# pide al modelo es un arreglo JSON de unas pocas lineas; 16000 tokens contra
+# una API rapida es inofensivo, pero un modelo corriendo en CPU que se ponga a
+# divagar hasta ese techo tarda media hora y se lleva el worker por delante.
+_MAX_TOKENS_LOCAL = 2048
+
 
 @dataclass(frozen=True)
 class Respuesta:
@@ -197,7 +203,7 @@ class ClienteIA:
             "messages": [{"role": "system", "content": sistema},
                          {"role": "user", "content": prompt}],
             "options": {"temperature": 0, "seed": 0,
-                        "num_predict": _MAX_TOKENS},
+                        "num_predict": _MAX_TOKENS_LOCAL},
         }
         try:
             respuesta = httpx.post("%s/api/chat" % url_local(), json=cuerpo,
