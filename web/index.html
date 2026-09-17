@@ -429,7 +429,11 @@ a.dl { display: inline-block; margin-top: 10px; text-decoration: none; }
       <div>
         <nav class="pestanas no-imprimir" id="pestanas">
           <button class="pestana activa" data-hoja="resumen">Resumen</button>
-          <button class="pestana" data-hoja="controles" id="b-controles">Controles<span class="n" id="n-controles"></span></button>
+          <!-- La pestana Controles solo se muestra si quedaron controles sin
+               ejecutar por falta de un insumo. Ustedes revisan valores y
+               diferencias, no un semaforo de dieciocho controles: el
+               aparataje queda detras, disponible cuando hace falta. -->
+          <button class="pestana hidden" data-hoja="controles" id="b-controles">Notas de revision<span class="n" id="n-controles"></span></button>
         </nav>
 
         <!-- Una sola hoja con lo que se mira junto: en que termino, con
@@ -456,28 +460,19 @@ a.dl { display: inline-block; margin-top: 10px; text-decoration: none; }
             </div>
           </div>
 
-          <div class="panel" style="margin-bottom:0">
-            <!-- El numero lo pone pintar(): decia 16 cuando el tablero ya
-                 mostraba 18, porque quedo escrito antes de IA-1 e IA-3. -->
-            <div class="rotulo" style="margin-bottom:10px" id="rotulo-controles">Los controles</div>
-            <div class="tira" id="tira"></div>
-            <div class="leyenda">
-              <span><i style="background:var(--verde-vivo)"></i>paso</span>
-              <span><i style="background:var(--rojo)"></i>fallo</span>
-              <span><i style="background:var(--ambar)"></i>no se ejecuto</span>
-              <span><i style="background:var(--lila)"></i>atestado</span>
-              <span><i style="background:var(--regla)"></i>no aplica</span>
-            </div>
-          </div>
+          <!-- La tira de controles y su leyenda se quitaron: ustedes revisan
+               valores y diferencias, no un semaforo. Los controles siguen
+               corriendo detras y alimentan las diferencias de abajo, pero no
+               son la salida. -->
 
           <div>
-            <div class="rotulo" style="margin-bottom:8px">Excepciones <span id="n-exc"></span></div>
+            <div class="rotulo" style="margin-bottom:8px">Diferencias encontradas <span id="n-exc"></span></div>
             <div class="panel" style="padding:0;margin-bottom:0">
               <div class="marco-tabla"><table class="tabla" id="tabla-excepciones"></table></div>
             </div>
             <p id="sin-excepciones" class="hidden" style="color:var(--tinta-suave);font-size:13px;margin-top:12px">
-              Ningun control registro excepciones. Eso no equivale a una revision limpia:
-              revise cuantos controles quedaron sin ejecutar.
+              El motor no encontro diferencias entre lo declarado y los libros.
+              Si arriba dice que quedaron insumos sin aportar, revise las notas de revision antes de firmar.
             </p>
           </div>
         </section>
@@ -838,39 +833,43 @@ function pintar(data){
   // -------------------------------------------------------- conclusion
   $("#concl").innerHTML = R.conclusion || "";
 
-  // -------------------------------------------------------- controles
-  const noOK = R.controles.filter(c => c.estado !== "OK").length;
-  $("#n-controles").textContent = noOK ? `${noOK}/${R.controles.length}` : R.controles.length;
-  $("#b-controles").title = noOK
-    ? `${noOK} de ${R.controles.length} controles no quedaron en OK`
-    : `Los ${R.controles.length} controles quedaron en OK`;
-  $("#controles").innerHTML = R.controles.map(ctl => `
-    <div class="control">
-      <p class="titulo">
-        <span class="marca-check">${MARCA_ESTADO[ctl.estado] ?? ""}</span>
-        <span class="cod">${ctl.codigo}</span> ${ctl.nombre}
-        <span class="chip chip-${TONO_ESTADO[ctl.estado] ?? "gris"}">${ctl.estado}</span>
-      </p>
-      <p class="detalle detalle-sangria">${ctl.detalle}</p>
-    </div>`).join("");
+  // ---------------------------------------------- notas de revision
+  // La pestana quedo escondida por defecto. Solo se muestra si hay controles
+  // NO_EJECUTADO: ustedes no necesitan ver el semaforo entero, pero si
+  // necesitan saber que cruces quedaron sin correr por falta de un insumo.
+  const sinEjecutar = R.controles.filter(c => c.estado === "NO EJECUTADO");
+  const hayNotas = sinEjecutar.length > 0;
+  $("#b-controles").classList.toggle("hidden", !hayNotas);
+  $("#n-controles").textContent = hayNotas ? sinEjecutar.length : "";
+  $("#b-controles").title = hayNotas
+    ? `${sinEjecutar.length} verificacion(es) sin correr por falta de insumos` : "";
+  // Solo los NO_EJECUTADO: los OK y las excepciones ya se ven en las
+  // Diferencias. Aqui va lo que se dejo sin verificar, y por que.
+  $("#controles").innerHTML = sinEjecutar.length ? `
+    <p style="font-size:13px;color:var(--tinta-suave);margin-bottom:12px">
+      Estas verificaciones no se corrieron porque falto el insumo que
+      necesitan. No son diferencias -- son cruces pendientes.
+    </p>
+    ${sinEjecutar.map(ctl => `
+      <div class="control">
+        <p class="titulo">
+          <span class="cod">${ctl.codigo}</span> ${ctl.nombre}
+        </p>
+        <p class="detalle detalle-sangria">${ctl.detalle}</p>
+      </div>`).join("")}` : "";
 
   // ------------------------------------------------------- excepciones
   const hs = R.excepciones || [];
   $("#n-exc").textContent = hs.length ? `· ${hs.length}` : "";
   $("#sin-excepciones").classList.toggle("hidden", hs.length > 0);
   $("#tabla-excepciones").innerHTML = hs.length ? `
-    <thead><tr><th>Severidad</th><th>Control</th><th>Ref.</th><th>Descripcion</th><th>Impacto $</th></tr></thead>
-    <tbody>${hs.map(h => `<tr><td class="sev-${h.severidad}">${h.severidad}</td><td>${h.control}</td>
+    <thead><tr><th></th><th>Ref.</th><th>Diferencia</th><th style="text-align:right">Impacto $</th></tr></thead>
+    <tbody>${hs.map(h => `<tr>
+      <td class="sev-${h.severidad}" style="white-space:nowrap">${h.severidad}</td>
       <td class="cifra" style="font-size:12px">${h.tipo_referencia?h.tipo_referencia+" "+h.renglon:""}</td>
       <td>${h.descripcion}</td><td class="cifra">${h.impacto ? fmt(h.impacto) : "\u2014"}</td></tr>`).join("")}</tbody>` : "";
 
-  // ------------------------------------------------- la tira de controles
-  $("#rotulo-controles").textContent = "Los " + R.controles.length + " controles";
-  $("#tira").innerHTML = R.controles.map(ctl => `
-    <div class="celda" title="${ctl.codigo}: ${ctl.nombre} — ${ctl.estado}">
-      <span class="c">${ctl.codigo}</span>
-      <span class="p ${PASTILLA[ctl.estado] ?? "e-NA"}"></span>
-    </div>`).join("");
+  // La tira de controles se elimino: ustedes miran diferencias, no un semaforo.
 
   // ------------------------------------------------------------ cifras
   const c = R.cifras;

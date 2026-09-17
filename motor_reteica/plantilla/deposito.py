@@ -152,10 +152,27 @@ def _depositar_aux_fiscal(libro, ctx) -> None:
 
 
 def _depositar_cuadro_reteica(libro, ctx) -> None:
+    """El reporte del ERP, transcrito completo.
+
+    Antes se escribian solo 4 columnas -- las que usan los cruces -- y el
+    resto quedaba en blanco. El papel del auditor pega las 8 que trae el
+    export, y una de ellas (Impte.neto 2 MI) es la BASE SUJETA de la
+    retencion: sin ella, el que revisa no puede recalcular la tarifa efectiva
+    ni confirmar que la retencion practicada corresponde a lo que se le pago
+    al tercero.
+
+    Se transcribe la fuente tal cual, con el mismo criterio del BALANCE: es
+    evidencia, no una seleccion.
+    """
     hoja = libro[_CUADRO[0]]
     inicio, fin = _CUADRO[1], _CUADRO[2]
     _limpiar(hoja, inicio, fin, range(2, 10))
 
+    if _transcribir_erp(hoja, ctx, inicio, fin):
+        return
+
+    # Sin ruta al archivo -- CLI vieja, o pruebas antiguas -- se cae al
+    # deposito minimo: no rompe, solo escribe menos columnas.
     fila = inicio
     for registro in ctx.filas_erp or []:
         hoja.cell(row=fila, column=2, value=registro.nit)
@@ -164,11 +181,58 @@ def _depositar_cuadro_reteica(libro, ctx) -> None:
         hoja.cell(row=fila, column=7, value=int(registro.base))
         hoja.cell(row=fila, column=8, value=int(registro.retencion))
         fila += 1
+    ultima = max(inicio, fila - 1)
+    hoja.cell(row=fila, column=7, value="=SUM(G%d:G%d)" % (inicio, ultima))
+    hoja.cell(row=fila, column=8, value="=SUM(H%d:H%d)" % (inicio, ultima))
 
+
+def _transcribir_erp(hoja, ctx, inicio: int, fin: int) -> bool:
+    """Vuelca el reporte del ERP completo, columna por columna.
+
+    Como con el balance: el papel de trabajo ES la evidencia. El auditor
+    verifica la retencion practicada comparando importe con base sujeta, y
+    ambas viven en columnas que el motor descartaba al leer.
+    """
+    ruta = (ctx.rutas or {}).get("erp")
+    if not ruta:
+        return False
+
+    try:
+        from motor_reteica.ingesta._io import leer_filas
+        from motor_reteica.parametros.columnas import (FIRMA_ERP, ROLES_ERP,
+                                                       localizar_columnas)
+        filas = leer_filas(ruta)
+        encabezado, _ = localizar_columnas(filas, ROLES_ERP, FIRMA_ERP)
+    except Exception:
+        return False
+
+    datos = [f for f in filas[encabezado + 1:]
+             if any(c not in (None, "") for c in f)
+             and any(_texto_no_vacio(c) for c in f[1:4])]
+    if not datos:
+        return False
+
+    _escribir_fila(hoja, inicio - 1, filas[encabezado])
+
+    fila = inicio
+    for origen in datos:
+        if fila > fin - 1:      # deja la ultima fila para las sumas
+            break
+        hoja.row_dimensions[fila].hidden = False
+        _escribir_fila(hoja, fila, origen)
+        fila += 1
+
+    # Sumas para las dos columnas que ya venian sumadas en la plantilla.
+    ultima = max(inicio, fila - 1)
     hoja.cell(row=fila, column=7,
-              value="=SUM(G%d:G%d)" % (inicio, max(inicio, fila - 1)))
+              value="=SUM(G%d:G%d)" % (inicio, ultima))
     hoja.cell(row=fila, column=8,
-              value="=SUM(H%d:H%d)" % (inicio, max(inicio, fila - 1)))
+              value="=SUM(H%d:H%d)" % (inicio, ultima))
+    return True
+
+
+def _texto_no_vacio(valor) -> bool:
+    return valor not in (None, "") and str(valor).strip() != ""
 
 
 def _depositar_balance(libro, ctx) -> None:
