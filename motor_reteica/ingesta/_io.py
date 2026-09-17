@@ -85,16 +85,21 @@ def _leer_tsv_unicode(ruta: Path) -> list:
     en 'Saldos de cuentas de mayor' y otros reportes. El separador es tab;
     los numeros vienen con formato colombiano ('29.982.086') y se convierten
     a numero cuando se puedan -- si no, se dejan como texto para que el
-    detector de columnas los vea como etiquetas y decida."""
+    detector de columnas los vea como etiquetas y decida.
+
+    Todas las filas se PADEAN a la longitud del encabezado. Sin eso, las
+    filas cortas (subtotales, separadores) provocan IndexError cuando la
+    ingesta pide 'fila[col["cuenta"]]'.
+    """
     texto = ruta.read_bytes().decode("utf-16")
-    filas = []
-    for linea in texto.splitlines():
-        celdas = tuple(_normalizar(c) for c in linea.split("\t"))
-        # Descarta la ultima celda vacia de las lineas que terminan en \t.
-        while celdas and celdas[-1] in ("", None):
-            celdas = celdas[:-1]
-        filas.append(celdas)
-    return filas
+    filas_crudas = [
+        [_normalizar(c) for c in linea.split("\t")]
+        for linea in texto.splitlines()
+    ]
+    if not filas_crudas:
+        return []
+    ancho = max(len(f) for f in filas_crudas)
+    return [tuple(f + [None] * (ancho - len(f))) for f in filas_crudas]
 
 
 def _normalizar(celda: str):

@@ -26,7 +26,8 @@ from motor_reteica.identidad import (IdentidadIncompatible, huella,
 from motor_reteica.ingesta.auxiliar import leer_auxiliar
 from motor_reteica.ingesta.balance import (DEBITO, leer_acumulados,
                                             leer_balance, leer_naturalezas)
-from motor_reteica.ingesta.borrador_pdf import leer_borrador
+from motor_reteica.ingesta.borrador_pdf import Borrador, leer_borrador
+from motor_reteica.ingesta.borrador_universal import leer_borrador_universal
 from motor_reteica.ingesta.formato_historico import (leer_formato_historico,
                                                      periodo_anterior)
 from motor_reteica.ingesta.facturas_pdf import leer_factura
@@ -193,6 +194,62 @@ def _resolver_legado(carpeta):
     return rutas, presentes, rutas_facturas
 
 
+def _corrida_segura(codigo: str, nombre: str, fn, *args, **kwargs):
+    """Corre un control y traduce cualquier fallo a NO_EJECUTADO.
+
+    Antes esto no existia porque el borrador siempre era el de Santa Marta y
+    todos los renglones estaban. Con la aceptacion de otros municipios el
+    borrador puede llegar como ESQUELETO -- sin renglones ni actividades --
+    y un control que asuma renglones['24'] revienta con KeyError. Tumbar la
+    revision entera por eso seria peor que la falta del dato: se acepta un
+    control NO_EJECUTADO y se sigue con los demas.
+
+    Los errores de LOGICA del control (calculos mal escritos) tambien caen
+    aqui, pero el detalle guarda type(error).__name__ para que se puedan
+    distinguir en el papel de una falta de dato legitima.
+    """
+    from motor_reteica.controles import _no_ejecutado
+    try:
+        return fn(*args, **kwargs)
+    except Exception as error:
+        motivo = "%s: %s" % (type(error).__name__, str(error) or "sin detalle")
+        return _no_ejecutado(codigo, nombre, motivo[:180])
+
+
+def _borrador_o_esqueleto(ruta, nit_fallback: str, periodo_fallback: str,
+                          municipio_fallback: str) -> Borrador:
+    """Devuelve el Borrador rico si el reader de Santa Marta lo puede leer;
+    si no, un ESQUELETO con lo minimo que el extractor universal saca.
+
+    El esqueleto trae NIT/municipio/periodo pero renglones y actividades
+    vacios: los controles que dependan de ellos quedaran NO_EJECUTADO, que
+    es la verdad -- no reconocimos la estructura de ese borrador. El cruce
+    universal del papel sigue funcionando porque solo depende del total
+    confirmado por el auditor, no del borrador leido.
+    """
+    try:
+        return leer_borrador(ruta)
+    except Exception:
+        pass
+
+    universal = leer_borrador_universal(ruta)
+    try:
+        anio = int((universal.periodo or "1900-01").split("-")[0])
+    except ValueError:
+        anio = 1900
+    return Borrador(
+        nit=universal.nit or nit_fallback,
+        razon_social="",
+        municipio=universal.municipio or municipio_fallback,
+        anio=anio,
+        periodo=universal.periodo or periodo_fallback,
+        numero_formulario="",
+        renglones={},
+        actividades=[],
+        firma_revisor_fiscal=False,
+    )
+
+
 def revisar(carpeta, nit, periodo, municipio,
             cliente_ia=None) -> ContextoRevision:
     carpeta = Path(carpeta)
@@ -241,7 +298,14 @@ def revisar(carpeta, nit, periodo, municipio,
     # una adivinanza -- y C13 lo deja escrito.
     excluidas_efectivas = atestacion.cuentas_excluidas() | candidatas_sin_declarar
 
-    borrador = leer_borrador(rutas["borrador"])
+    # Se prefiere el reader rico (con renglones, actividades y tarifas
+    # discriminadas), que hoy solo entiende el formato de Santa Marta. Para
+    # cualquier otro municipio se cae al lector universal, que devuelve un
+    # Borrador MINIMO con NIT/municipio/periodo/total: los controles que
+    # exigen renglones quedaran NO_EJECUTADO, pero el papel sale con el
+    # cruce universal declarado-vs-auxiliar, que es el objetivo minimo.
+    borrador = _borrador_o_esqueleto(rutas["borrador"], nit, periodo,
+                                     municipio.nombre)
     lineas = leer_auxiliar(rutas["auxiliar"])
     saldos = (leer_balance(rutas["balance"], excluidas_efectivas)
               if "balance" in presentes else None)
@@ -273,24 +337,50 @@ def revisar(carpeta, nit, periodo, municipio,
     # vez de dejar tres observaciones sueltas.
     documentos_revisados = len({l.referencia for l in lineas if l.referencia})
 
+    # Cada control corre en su propio envoltorio: si un renglon esperado no
+    # esta (borrador esqueleto de un municipio nuevo), la excepcion se
+    # traduce a NO_EJECUTADO en vez de tumbar la revision entera. La
+    # alternativa era tocar 15 funciones para agregarles la misma guarda.
+    _correr = lambda codigo, nombre, fn, *a, **k: _corrida_segura(
+        codigo, nombre, fn, *a, **k)
+
     resultados = [
         c0,
-        controles.c1_formulario_cuadra(borrador, municipio),
-        controles.c2_balance_vs_auxiliar(saldos, lineas),
-        controles.c3_auxiliar_vs_erp(lineas, filas_erp),
-        controles.c4_recalculo(recon),
-        controles.c5_coherencia_cuenta_codigo(lineas, filas_erp, municipio),
-        controles.c6_clasificacion_por_linea(recon, facturas, mapa, municipio),
-        controles.c7_tarifas_vs_estatuto(borrador, municipio, atestacion),
-        controles.c8_corte(lineas, periodo),
-        controles.c9_reconstruccion_vs_borrador(recon, borrador, mapa),
-        controles.c10_redondeo(borrador, recon),
-        controles.c11_cotejo_facturas(lineas, facturas, municipio),
-        controles.c12_continuidad(saldo_anterior, pago_anterior),
-        controles.c13_formales(borrador, municipio, presentes,
-                               candidatas_sin_declarar),
-        controles.c14_compras_vs_servicios(recon, municipio),
-        controles.c15_formato_historico(borrador, historico, periodo),
+        _correr("C1", "Formulario cuadra",
+                controles.c1_formulario_cuadra, borrador, municipio),
+        _correr("C2", "Balance vs auxiliar",
+                controles.c2_balance_vs_auxiliar, saldos, lineas),
+        _correr("C3", "Auxiliar vs ERP",
+                controles.c3_auxiliar_vs_erp, lineas, filas_erp),
+        _correr("C4", "Recalculo",
+                controles.c4_recalculo, recon),
+        _correr("C5", "Coherencia cuenta-codigo",
+                controles.c5_coherencia_cuenta_codigo, lineas, filas_erp,
+                municipio),
+        _correr("C6", "Clasificacion por linea",
+                controles.c6_clasificacion_por_linea, recon, facturas, mapa,
+                municipio),
+        _correr("C7", "Tarifas vs estatuto",
+                controles.c7_tarifas_vs_estatuto, borrador, municipio,
+                atestacion),
+        _correr("C8", "Corte",
+                controles.c8_corte, lineas, periodo),
+        _correr("C9", "Reconstruccion vs borrador",
+                controles.c9_reconstruccion_vs_borrador, recon, borrador,
+                mapa),
+        _correr("C10", "Redondeo",
+                controles.c10_redondeo, borrador, recon),
+        _correr("C11", "Cotejo facturas",
+                controles.c11_cotejo_facturas, lineas, facturas, municipio),
+        _correr("C12", "Continuidad",
+                controles.c12_continuidad, saldo_anterior, pago_anterior),
+        _correr("C13", "Controles formales",
+                controles.c13_formales, borrador, municipio, presentes,
+                candidatas_sin_declarar),
+        _correr("C14", "Compras vs servicios",
+                controles.c14_compras_vs_servicios, recon, municipio),
+        _correr("C15", "Formato historico",
+                controles.c15_formato_historico, borrador, historico, periodo),
     ]
 
     # D7: la IA tiene CARRIL PROPIO. No modifica C0..C15; sus salidas entran
