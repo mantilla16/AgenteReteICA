@@ -117,20 +117,45 @@ def _fecha(valor) -> str:
     return valor.strftime("%d.%m.%Y")
 
 
-def _depositar_aux_fiscal(libro, ctx) -> None:
-    """El auxiliar del cliente, pegado tal cual.
+_COLUMNAS_AUX_FISCAL = (
+    # (etiquetas aceptadas, columna destino 1-based)
+    (("Cuenta",),                                       2),   # B
+    (("Texto breve", "Texto"),                          3),   # C
+    (("Asignación", "Asignacion"),                      4),   # D
+    (("Tercero",),                                      5),   # E
+    (("Fecha doc.",),                                   6),   # F
+    (("Fe.contab.",),                                   7),   # G
+    (("Referencia",),                                   8),   # H
+    (("Importe en ML", "Importe en moneda local"),      9),   # I
+    (("Período", "Periodo"),                           10),   # J
+    (("Cla",),                                         11),   # K
+    (("Nº doc.", "N° doc."),                           12),   # L
+    (("Texto largo", "Texto de cabecera de documento"), 13),  # M  (opcional)
+    (("Importe valorado ML2",),                        14),   # N
+    (("Soc.", "Sociedad"),                             15),   # O
+)
 
-    Antes se armaban filas a partir de ctx.lineas (objetos reprocesados con
-    signo invertido, cuenta filtrada, columnas normalizadas). Ahora la hoja
-    es EVIDENCIA: se pega el archivo que entrego el cliente sin tocar --
-    misma disposicion, mismos valores, mismo formato de columna. Si el que
-    revisa lo quiere ver de otra forma, abre el archivo original; lo que se
-    pega aca es la fuente.
+
+def _depositar_aux_fiscal(libro, ctx) -> None:
+    """El auxiliar del cliente, alineado a las columnas del papel.
+
+    Antes se copiaba posicion por posicion y las columnas caian corridas:
+    Cuenta aterrizaba en D en vez de B, y las ultimas columnas (Texto,
+    ML2, Sociedad) se perdian por el limite del rango. Ahora se hace lo
+    que el auditor haria a mano: se identifica el encabezado del archivo,
+    cada etiqueta conocida se ubica en la columna que la plantilla tiene
+    fijada, y las columnas del archivo sin etiqueta reconocida se
+    descartan.
+
+    La hoja sigue siendo EVIDENCIA: se pega lo que entrego el cliente,
+    solo se corrige la ubicacion.
     """
     hoja = libro[_AUX_FISCAL[0]]
     inicio, fin = _AUX_FISCAL[1], _AUX_FISCAL[2]
     _limpiar(hoja, inicio, fin, range(1, 16))
-    _pegar_fuente_completa(hoja, (ctx.rutas or {}).get("auxiliar"), inicio, fin)
+    _pegar_alineado(hoja, (ctx.rutas or {}).get("auxiliar"),
+                    inicio, fin, _COLUMNAS_AUX_FISCAL,
+                    marca_encabezado="Cuenta")
 
 
 def _depositar_cuadro_reteica(libro, ctx) -> None:
@@ -253,17 +278,22 @@ def _depositar_balance(libro, ctx) -> None:
     hoja = libro[_BALANCE[0]]
     inicio, fin = _BALANCE[1], _BALANCE[2]
     _limpiar(hoja, inicio, fin, range(1, 16))
-    ultima = _pegar_balance_alineado(hoja,
-                                     (ctx.rutas or {}).get("balance"),
-                                     inicio, fin)
+    ultima = _pegar_alineado(hoja, (ctx.rutas or {}).get("balance"),
+                             inicio, fin, _COLUMNAS_BALANCE,
+                             marca_encabezado="Cta.mayor")
     if ultima is None:
         return
     _sellar_balance_con_subtotales(hoja, encabezado=inicio - 1,
                                    primera_dato=inicio, ultima_dato=ultima)
 
 
-def _pegar_balance_alineado(hoja, ruta, inicio: int, fin: int):
-    """Pega el balance con las columnas alineadas al layout de la plantilla.
+def _pegar_alineado(hoja, ruta, inicio: int, fin: int,
+                    columnas_destino, marca_encabezado: str):
+    """Pega la fuente con las columnas alineadas al layout de la plantilla.
+
+    `columnas_destino`: tupla de (etiquetas_alias, columna_destino_1based).
+    `marca_encabezado`: etiqueta que identifica la fila de encabezado del
+      archivo (ej. 'Cta.mayor' para balance, 'Cuenta' para auxiliar).
 
     Devuelve el numero de la ultima fila escrita, o None si no hubo datos.
     """
@@ -288,7 +318,8 @@ def _pegar_balance_alineado(hoja, ruta, inicio: int, fin: int):
         _recortar(hoja, inicio, fin)
         return None
 
-    idx_encabezado, mapa = _mapear_columnas_balance(filas)
+    idx_encabezado, mapa = _mapear_columnas(filas, columnas_destino,
+                                            marca_encabezado)
     if mapa is None:
         # Sin encabezado reconocible: se cae al comportamiento anterior para
         # no dejar la hoja vacia. La suite de tests exige al menos que se
@@ -324,13 +355,14 @@ def _pegar_balance_alineado(hoja, ruta, inicio: int, fin: int):
     return ultima if ultima >= inicio else None
 
 
-def _mapear_columnas_balance(filas) -> tuple:
+def _mapear_columnas(filas, columnas_destino, marca: str) -> tuple:
     """Devuelve (indice_de_fila_encabezado, {col_origen: col_destino}).
 
-    Recorre las primeras 15 filas buscando una que contenga 'Cta.mayor':
-    esa es la fila de encabezado del balance de SAP. Dentro de ella, cada
-    etiqueta conocida se resuelve a la columna donde la plantilla la espera.
-    Etiquetas no reconocidas (los separadores del export) se descartan.
+    Recorre las primeras 15 filas buscando la que contenga `marca` como
+    encabezado. Dentro de ella, cada etiqueta conocida se resuelve a la
+    columna destino que la plantilla tiene fijada. Etiquetas no
+    reconocidas se descartan (son separadores u otras columnas del
+    export que la plantilla no reserva).
     """
     for indice, fila in enumerate(filas[:15]):
         etiquetas = {}
@@ -338,10 +370,10 @@ def _mapear_columnas_balance(filas) -> tuple:
             texto = str(celda).strip() if celda is not None else ""
             if texto:
                 etiquetas[texto] = pos
-        if "Cta.mayor" not in etiquetas:
+        if marca not in etiquetas:
             continue
         mapa = {}
-        for alias, destino in _COLUMNAS_BALANCE:
+        for alias, destino in columnas_destino:
             for etiqueta in alias:
                 if etiqueta in etiquetas:
                     mapa[etiquetas[etiqueta]] = destino

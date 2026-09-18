@@ -63,11 +63,41 @@ def test_balance_conserva_los_encabezados_de_la_fuente(papel):
 
 def test_aux_fiscal_pega_el_auxiliar_completo(papel):
     """El auxiliar de TERLICA trae 12 movimientos + 1 fila de TOTAL. Todos
-    tienen que aparecer sin depender de que el motor los haya podido leer."""
+    tienen que aparecer sin depender de que el motor los haya podido leer.
+
+    La cuenta va en B, que es donde la plantilla la espera (ver encabezado
+    'Cuenta' en la fila 6 de la plantilla)."""
     hoja = papel["AUX FISCAL"]
-    cuentas = [str(c.value) for c in hoja["D"]
+    cuentas = [str(c.value) for c in hoja["B"]
                if c.value and str(c.value).startswith("2368")]
     assert len(cuentas) == 12, "esperado 12 lineas del auxiliar TERLICA"
+
+
+def test_aux_fiscal_pega_datos_en_las_columnas_correctas(papel):
+    """Como el balance: si la fuente trae la Cuenta en una columna que no
+    coincide con la de la plantilla, hay que ALINEAR por etiqueta. Cuenta
+    en B, Asignacion en D, Soc. en O -- lo que la plantilla tiene fijado."""
+    hoja = papel["AUX FISCAL"]
+    fila_enc = 6
+    encabezados = {}
+    for c in range(1, 16):
+        v = hoja.cell(row=fila_enc, column=c).value
+        if v:
+            encabezados[str(v).strip()] = c
+    assert encabezados.get("Cuenta") == 2, (
+        "Cuenta debe ir en B, quedo en %s" % encabezados.get("Cuenta"))
+    for etiqueta in ("Asignación", "Asignacion"):
+        if etiqueta in encabezados:
+            assert encabezados[etiqueta] == 4, (
+                "%s debe ir en D, quedo en %s"
+                % (etiqueta, encabezados[etiqueta]))
+            break
+    for etiqueta in ("Soc.", "Sociedad"):
+        if etiqueta in encabezados:
+            assert encabezados[etiqueta] == 15, (
+                "%s debe ir en O, quedo en %s"
+                % (etiqueta, encabezados[etiqueta]))
+            break
 
 
 def test_aux_fiscal_conserva_los_encabezados_de_la_fuente(papel):

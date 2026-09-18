@@ -52,9 +52,11 @@ def test_aux_fiscal_trae_el_auxiliar_del_cliente_tal_cual(papel):
     # El auxiliar de TERLICA tiene 12 lineas de datos con sus 5 columnas
     # tipicas del export FBL3N: Cuenta, Texto breve, Asignacion (NIT),
     # Tercero, Fecha doc, Fe.contab, Referencia, Importe en ML.
-    cuentas = [hoja.cell(row=f, column=4).value for f in range(1, hoja.max_row + 1)
-               if hoja.cell(row=f, column=4).value
-               and str(hoja.cell(row=f, column=4).value).startswith("2368")]
+    # Cuenta en col B (2): la plantilla la tiene fijada ahi y el motor
+    # ahora alinea por etiqueta en vez de copiar posicion por posicion.
+    cuentas = [hoja.cell(row=f, column=2).value for f in range(1, hoja.max_row + 1)
+               if hoja.cell(row=f, column=2).value
+               and str(hoja.cell(row=f, column=2).value).startswith("2368")]
     assert len(cuentas) == 12, "esperado 12 lineas del auxiliar"
 
 
@@ -67,10 +69,12 @@ def test_aux_fiscal_conserva_los_importes_con_su_signo_original(papel):
     Se suma solo el DETALLE (filas con cuenta 2368 en col D), no la fila
     de TOTAL que trae el archivo -- sumar ambos duplicaria la cifra."""
     hoja = papel["AUX FISCAL"]
+    # Cuenta va en B (2) e Importe en ML en I (9), donde la plantilla los
+    # tiene fijados. El motor alinea por etiqueta al pegar.
     importes = []
     for f in range(1, hoja.max_row + 1):
-        cuenta = str(hoja.cell(row=f, column=4).value or "")
-        importe = hoja.cell(row=f, column=12).value
+        cuenta = str(hoja.cell(row=f, column=2).value or "")
+        importe = hoja.cell(row=f, column=9).value
         if cuenta.startswith("2368") and isinstance(importe, (int, float)):
             importes.append(importe)
     assert importes, "no llego ningun importe"
@@ -163,10 +167,11 @@ def test_el_texto_de_la_cuenta_viene_del_cliente_no_lo_construye_el_motor(papel)
     las 2368010007 y 2368010010, cualquiera sea la forma exacta que use
     ese cliente."""
     hoja = papel["AUX FISCAL"]
+    # Cuenta en B (2), Texto breve en C (3): el layout fijado por la plantilla.
     textos = set()
     for f in range(1, hoja.max_row + 1):
-        cuenta = str(hoja.cell(row=f, column=4).value or "")
-        texto = hoja.cell(row=f, column=5).value
+        cuenta = str(hoja.cell(row=f, column=2).value or "")
+        texto = hoja.cell(row=f, column=3).value
         if cuenta.startswith("2368") and texto:
             textos.add(texto)
     # Al menos aparece la palabra "Impuest ICA" que es lo comun a los dos
