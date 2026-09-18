@@ -493,6 +493,57 @@ def c8_corte(lineas, periodo) -> ResultadoControl:
                      "PDF." % (len(lineas), periodo))
 
 
+def _resolver_linea_de_factura(numero, por_referencia):
+    """Devuelve la linea del auxiliar cuya referencia empareja `numero`.
+
+    El match antes era exacto por string y fallaba por diferencias de
+    forma que no cambian la identidad del documento: un cero a la
+    izquierda, un prefijo tipo 'FE' o 'FEV', una coletilla de sucursal.
+    El auditor reportaba 'la factura no aparece en el auxiliar' cuando
+    en realidad si estaba, solo con distinto encabezado.
+
+    Reglas, en orden:
+      1) coincidencia exacta;
+      2) coincidencia por los DIGITOS solamente (ignora letras/simbolos);
+      3) una es sub-cadena de la otra en digitos, con al menos 4 digitos
+         para no crear falsos positivos.
+    """
+    linea = por_referencia.get(numero)
+    if linea is not None:
+        return linea
+
+    import re as _re
+    digitos_factura = _re.sub(r"\D", "", str(numero or ""))
+    if not digitos_factura:
+        return None
+
+    # Precalculo los digitos de cada referencia una vez, no una por cada
+    # factura.
+    if not hasattr(_resolver_linea_de_factura, "_indice"):
+        _resolver_linea_de_factura._indice = {}
+    cache = _resolver_linea_de_factura._indice
+    clave = id(por_referencia)
+    if clave not in cache:
+        cache.clear()   # solo un indice a la vez (una revision es un scope)
+        cache[clave] = [(_re.sub(r"\D", "", str(r or "")), l)
+                        for r, l in por_referencia.items()]
+
+    # Coincidencia por digitos exactos primero.
+    for digitos_ref, linea in cache[clave]:
+        if digitos_ref == digitos_factura:
+            return linea
+
+    # Sub-cadena. Minimo 4 digitos para evitar que '1' empareje con todo.
+    if len(digitos_factura) >= 4:
+        for digitos_ref, linea in cache[clave]:
+            if not digitos_ref:
+                continue
+            if digitos_factura in digitos_ref or digitos_ref in digitos_factura:
+                return linea
+
+    return None
+
+
 def c11_cotejo_facturas(lineas, facturas, municipio) -> ResultadoControl:
     """Cotejo del documento fuente contra el registro contable.
 
@@ -520,7 +571,7 @@ def c11_cotejo_facturas(lineas, facturas, municipio) -> ResultadoControl:
     sin_base = 0
 
     for factura in facturas:
-        linea = por_referencia.get(factura.numero)
+        linea = _resolver_linea_de_factura(factura.numero, por_referencia)
         if linea is None:
             excepciones.append(Excepcion(
                 severidad=Severidad.HALLAZGO, control="C11", documento=factura.numero,

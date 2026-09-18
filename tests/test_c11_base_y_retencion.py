@@ -153,3 +153,39 @@ def test_factura_que_no_esta_en_el_auxiliar_sigue_siendo_hallazgo(lineas, factur
     assert resultado.estado is Estado.FALLA
     assert any(e.severidad is Severidad.HALLAZGO
                for e in _excepciones_de(resultado, "FE99999"))
+
+
+def test_factura_con_prefijo_distinto_igual_encuentra_la_linea(lineas, facturas):
+    """El PDF de la factura 250530 podria haberse guardado como
+    'FE250530.pdf' o 'F-250530.pdf'; SAP registra la referencia como
+    '250530' pelado. El match tiene que ser tolerante a esas
+    diferencias de forma que no cambian la identidad del documento."""
+    factura_250530 = _de(facturas, "250530")
+    variantes = ["FE250530", "F-250530", "0250530", "250530-1"]
+    for etiqueta in variantes:
+        alterada = replace(factura_250530, numero=etiqueta)
+        resultado = c11_cotejo_facturas(lineas, [alterada], MUNICIPIO)
+        excepciones_no_esta = [
+            e for e in resultado.excepciones
+            if "no aparece en el auxiliar" in e.descripcion]
+        assert not excepciones_no_esta, (
+            "el motor reporto que '%s' no esta en el auxiliar, cuando en "
+            "realidad si esta (referencia 250530)" % etiqueta)
+
+
+def test_factura_realmente_ausente_todavia_falla(lineas, facturas):
+    """La tolerancia al prefijo no puede convertirse en un match falso.
+    Un numero corto o sin relacion sigue reportandose como ausente."""
+    factura_250530 = _de(facturas, "250530")
+    ausentes = ["", "ABC", "99"]
+    for etiqueta in ausentes:
+        alterada = replace(factura_250530, numero=etiqueta)
+        resultado = c11_cotejo_facturas(lineas, [alterada], MUNICIPIO)
+        # Sin digitos suficientes, el fallback fuzzy no debe emparejar
+        # con nada del auxiliar.
+        excepciones_no_esta = [
+            e for e in resultado.excepciones
+            if "no aparece en el auxiliar" in e.descripcion]
+        assert excepciones_no_esta, (
+            "'%s' no deberia haber encontrado linea, pero el fallback "
+            "fuzzy la emparejo (falso positivo)" % etiqueta)
