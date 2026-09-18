@@ -221,10 +221,19 @@ def _transcribir_erp(hoja, ctx, inicio: int, fin: int) -> bool:
 
     _escribir_fila(hoja, inicio - 1, filas[encabezado])
 
+    # Dinamico: la ultima fila (fin) esta reservada para las sumas. Si hay
+    # mas terceros que filas disponibles (fin - inicio), se INSERTAN filas
+    # antes de la de sumas -- se empuja hacia abajo. openpyxl.insert_rows
+    # actualiza los merges; las sumas se reescriben con el rango correcto
+    # despues del ajuste.
+    disponibles = fin - inicio
+    if len(datos) > disponibles:
+        extra = len(datos) - disponibles
+        hoja.insert_rows(fin, extra)
+        fin = fin + extra
+
     fila = inicio
     for origen in datos:
-        if fila > fin - 1:      # deja la ultima fila para las sumas
-            break
         hoja.row_dimensions[fila].hidden = False
         _escribir_fila(hoja, fila, origen)
         fila += 1
@@ -331,16 +340,23 @@ def _pegar_alineado(hoja, ruta, inicio: int, fin: int,
     datos = filas[idx_encabezado + 1:]
     while datos and _es_subtotal_del_final(datos[-1]):
         datos.pop()
+    datos = [d for d in datos if any(c not in (None, "") for c in d)]
+
+    # Dinamico: si el archivo trae mas filas de las que la plantilla tenia
+    # reservadas, se INSERTAN antes de recortar. El auditor exigio que no
+    # se omita informacion nunca; truncar era una decision del motor, no
+    # una limitacion real de Excel. openpyxl.insert_rows corre para abajo
+    # cualquier contenido que hubiera despues; no hay formulas de la
+    # plantilla que apunten a AUX FISCAL/BALANCE/CUADRO, verificado.
+    necesarias = len(datos)
+    disponibles = fin - inicio + 1
+    if necesarias > disponibles:
+        extra = necesarias - disponibles
+        hoja.insert_rows(fin + 1, extra)
+        fin = fin + extra
 
     fila = inicio
     for origen in datos:
-        if not any(c not in (None, "") for c in origen):
-            continue
-        if fila > fin:
-            hoja.cell(row=fin, column=2,
-                      value="TRUNCADO: el archivo trae mas filas de las que "
-                            "caben en esta hoja.")
-            break
         hoja.row_dimensions[fila].hidden = False
         for col_origen, col_destino in mapa.items():
             if col_origen >= len(origen):
@@ -505,16 +521,19 @@ def _pegar_fuente_completa(hoja, ruta, inicio: int, fin: int) -> None:
     filas_de_datos = filas[encabezado + 1:]
     while filas_de_datos and _es_subtotal_del_final(filas_de_datos[-1]):
         filas_de_datos.pop()
+    filas_de_datos = [f for f in filas_de_datos
+                      if any(c not in (None, "") for c in f)]
+
+    # Dinamico: mismo criterio que en _pegar_alineado. Nunca truncar.
+    necesarias = len(filas_de_datos)
+    disponibles = fin - inicio + 1
+    if necesarias > disponibles:
+        extra = necesarias - disponibles
+        hoja.insert_rows(fin + 1, extra)
+        fin = fin + extra
 
     fila = inicio
     for origen in filas_de_datos:
-        if not any(c not in (None, "") for c in origen):
-            continue
-        if fila > fin:
-            hoja.cell(row=fin, column=2,
-                      value="TRUNCADO: el archivo trae mas filas de las que "
-                            "caben en esta hoja.")
-            break
         hoja.row_dimensions[fila].hidden = False
         _escribir_fila(hoja, fila, origen)
         fila += 1

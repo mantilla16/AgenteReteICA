@@ -156,6 +156,57 @@ def test_balance_acota_el_rango_al_bloque_de_retenciones(papel):
             "-- deberia ser 236x" % (f, cuenta))
 
 
+def test_aux_fiscal_se_expande_si_el_auxiliar_tiene_muchas_lineas(tmp_path):
+    """Regla no negociable del auditor: no se puede omitir informacion.
+
+    La plantilla trae AUX FISCAL con espacio para 13 movimientos. Si el
+    cliente aporta un auxiliar con 40 lineas, la hoja tiene que crecer,
+    no truncar. Este test escribe un auxiliar sintetico de 30 lineas y
+    verifica que las 30 cuentas terminen en la hoja."""
+    import openpyxl as opx
+    fuente = tmp_path / "aux_grande.xlsx"
+    wb = opx.Workbook()
+    ws = wb.active
+    # Encabezado en la fila 6, igual que TERLICA.
+    ws.cell(row=6, column=3, value="St")
+    ws.cell(row=6, column=4, value="Cuenta")
+    ws.cell(row=6, column=5, value="Texto breve")
+    ws.cell(row=6, column=6, value="Asignación")
+    ws.cell(row=6, column=7, value="Tercero")
+    ws.cell(row=6, column=12, value="Importe en ML")
+    ws.cell(row=6, column=18, value="Soc.")
+    for i in range(30):
+        f = 8 + i
+        # B (col 2): en SAP siempre viene el marcador de sociedad o algo
+        # analogo -- por eso _es_subtotal_del_final no confunde filas de
+        # dato con subtotales al final. Lo pongo para reproducir el
+        # export real.
+        ws.cell(row=f, column=2, value="DA09")
+        ws.cell(row=f, column=4, value="2368010010")
+        ws.cell(row=f, column=5, value="Impuest ICA Rete 10%%")
+        ws.cell(row=f, column=6, value="900%06d" % i)
+        ws.cell(row=f, column=7, value="TERCERO %d" % i)
+        ws.cell(row=f, column=12, value=-1000 * (i + 1))
+        ws.cell(row=f, column=18, value="DA09")
+    wb.save(fuente)
+
+    ctx = revisar(BASE, nit="819002433", periodo="2026-07", municipio=MUNICIPIO)
+    # Reemplazo la ruta del auxiliar por la sintetica; el resto del ctx
+    # sigue igual, no importa que el pipeline no haya visto estas lineas:
+    # AUX FISCAL solo pega el archivo, no lo procesa.
+    ctx.rutas["auxiliar"] = fuente
+    salida = tmp_path / "papel.xlsx"
+    depositar(ctx, salida, total_declarado_confirmado=Decimal("474000"))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        libro = openpyxl.load_workbook(salida)
+    hoja = libro["AUX FISCAL"]
+    cuentas = [str(c.value) for c in hoja["B"]
+               if c.value and str(c.value).startswith("2368")]
+    assert len(cuentas) == 30, (
+        "esperado 30 lineas del auxiliar sintetico, llegaron %d" % len(cuentas))
+
+
 def test_las_demas_hojas_no_desaparecieron(papel):
     """Ocultar BORRADOR TERLICA no puede haber tumbado a nadie mas."""
     esperadas = {"Check List", "DECLARACION", "REVISION ICA",
