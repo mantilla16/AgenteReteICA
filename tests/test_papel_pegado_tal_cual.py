@@ -128,8 +128,38 @@ def test_balance_acota_el_rango_al_bloque_de_retenciones(papel):
 
 def test_las_demas_hojas_no_desaparecieron(papel):
     """Ocultar BORRADOR TERLICA no puede haber tumbado a nadie mas."""
-    esperadas = {"Check List", "DECLARACION", "Pago", "REVISION ICA",
+    esperadas = {"Check List", "DECLARACION", "REVISION ICA",
                  "BALANCE", "AUX FISCAL", "Validación de facturas",
                  "CUADRO RETEICA"}
     faltan = esperadas - set(papel.sheetnames)
     assert not faltan, "se perdieron hojas: %s" % faltan
+
+
+def test_pago_queda_oculta(papel):
+    """El auditor confirmo que la hoja 'Pago' no la usa. Se oculta por el
+    mismo motivo que BORRADOR TERLICA: fidelidad.py restaura las hojas
+    desde el paquete original, borrar desordena los ids de las demas."""
+    assert "Pago" in papel.sheetnames, "la hoja sigue existiendo"
+    assert papel["Pago"].sheet_state == "hidden", (
+        "la hoja Pago tiene que quedar oculta, no visible")
+
+
+def test_balance_pega_datos_en_las_columnas_correctas(papel):
+    """Los saldos no pueden caer fuera de sus columnas: si el balance
+    real trae separadores intercalados, hay que ALINEAR por etiqueta, no
+    copiar posicion por posicion. La cuenta debe quedar en C, el saldo
+    del periodo en H."""
+    hoja = papel["BALANCE"]
+    # Encabezado en la fila justo antes del area de datos.
+    encabezado_fila = 4
+    encabezados = {}
+    for c in range(1, 12):
+        v = hoja.cell(row=encabezado_fila, column=c).value
+        if v:
+            encabezados[str(v).strip()] = c
+    assert encabezados.get("Cta.mayor") == 3, (
+        "Cta.mayor debe quedar en columna C, quedo en %s"
+        % encabezados.get("Cta.mayor"))
+    assert encabezados.get("Saldo Haber per.inf.") == 9, (
+        "Saldo Haber per.inf. debe quedar en columna I, quedo en %s"
+        % encabezados.get("Saldo Haber per.inf."))

@@ -217,29 +217,147 @@ def _texto_no_vacio(valor) -> bool:
     return valor not in (None, "") and str(valor).strip() != ""
 
 
-def _depositar_balance(libro, ctx) -> None:
-    """El balance del cliente, pegado tal cual, con subtotales al final.
+_COLUMNAS_BALANCE = (
+    # (etiquetas aceptadas, columna destino 1-based)
+    (("Soc.", "Sociedad"),                             2),   # B
+    (("Cta.mayor",),                                   3),   # C
+    (("Texto breve", "Texto"),                         4),   # D
+    (("Mon.", "Moneda"),                               5),   # E
+    (("Arrastre de saldos",),                          6),   # F
+    (("Saldo per.anteriores",),                        7),   # G
+    (("Período de informe debe", "Periodo de informe debe"), 8),   # H
+    (("Saldo Haber per.inf.",),                        9),   # I
+    (("Saldo acumulado",),                            10),   # J
+)
 
-    La guia del auditor especifica:
+
+def _depositar_balance(libro, ctx) -> None:
+    """El balance del cliente, alineado a las columnas del papel.
+
+    El export de SAP trae columnas separadoras vacias (los 'Div.' y los
+    dropdowns intercalados) entre los datos utiles. Copiar posicion por
+    posicion metia los saldos en cualquier columna de la hoja y rompia la
+    lectura. Aca se hace lo que el auditor haria a mano: se detecta el
+    encabezado en el archivo, se identifica de que columna sale cada dato
+    por SU ETIQUETA, y se pega en la columna que la plantilla tiene fijada
+    para ese dato. Las columnas del archivo que no correspondan a ninguna
+    etiqueta conocida se descartan (son separadores del export).
+
+    Ademas, la guia del auditor especifica:
       - Pegar el balance completo (evidencia).
       - Autofiltro en el encabezado, para que el que revisa pueda filtrar
         por 'Cta.mayor que empiece por 2368' y ver solo las cuentas ICA.
       - Fila de subtotal al final con SUBTOTAL(9,...) sobre las columnas de
-        movimiento del periodo. SUBTOTAL(9,...) es especial: SOLO suma
-        filas visibles del rango. Con el filtro activo, los subtotales se
-        ajustan a las 2368 automaticamente -- justo como lo arma Robinson
-        a mano.
+        movimiento del periodo.
     """
     hoja = libro[_BALANCE[0]]
     inicio, fin = _BALANCE[1], _BALANCE[2]
-    _limpiar(hoja, inicio, fin, range(1, 12))
-    ultima = _pegar_fuente_completa(hoja,
-                                    (ctx.rutas or {}).get("balance"),
-                                    inicio, fin)
+    _limpiar(hoja, inicio, fin, range(1, 16))
+    ultima = _pegar_balance_alineado(hoja,
+                                     (ctx.rutas or {}).get("balance"),
+                                     inicio, fin)
     if ultima is None:
         return
     _sellar_balance_con_subtotales(hoja, encabezado=inicio - 1,
                                    primera_dato=inicio, ultima_dato=ultima)
+
+
+def _pegar_balance_alineado(hoja, ruta, inicio: int, fin: int):
+    """Pega el balance con las columnas alineadas al layout de la plantilla.
+
+    Devuelve el numero de la ultima fila escrita, o None si no hubo datos.
+    """
+    if not ruta:
+        hoja.cell(row=inicio, column=2,
+                  value="NO SE APORTO EL ARCHIVO DEL CLIENTE")
+        _recortar(hoja, inicio + 1, fin)
+        return None
+
+    try:
+        from motor_reteica.ingesta._io import leer_filas
+        filas = leer_filas(ruta)
+    except Exception as error:
+        hoja.cell(row=inicio, column=2,
+                  value="NO SE PUDO LEER EL ARCHIVO: %s" % error)
+        _recortar(hoja, inicio + 1, fin)
+        return None
+
+    while filas and not any(c not in (None, "") for c in filas[-1]):
+        filas.pop()
+    if not filas:
+        _recortar(hoja, inicio, fin)
+        return None
+
+    idx_encabezado, mapa = _mapear_columnas_balance(filas)
+    if mapa is None:
+        # Sin encabezado reconocible: se cae al comportamiento anterior para
+        # no dejar la hoja vacia. La suite de tests exige al menos que se
+        # pegue algo.
+        return _pegar_fuente_completa(hoja, ruta, inicio, fin)
+
+    _escribir_encabezado_alineado(hoja, inicio - 1, mapa, filas[idx_encabezado])
+
+    datos = filas[idx_encabezado + 1:]
+    while datos and _es_subtotal_del_final(datos[-1]):
+        datos.pop()
+
+    fila = inicio
+    for origen in datos:
+        if not any(c not in (None, "") for c in origen):
+            continue
+        if fila > fin:
+            hoja.cell(row=fin, column=2,
+                      value="TRUNCADO: el archivo trae mas filas de las que "
+                            "caben en esta hoja.")
+            break
+        hoja.row_dimensions[fila].hidden = False
+        for col_origen, col_destino in mapa.items():
+            if col_origen >= len(origen):
+                continue
+            celda = hoja.cell(row=fila, column=col_destino)
+            if _escribible(celda):
+                celda.value = origen[col_origen]
+        fila += 1
+
+    _recortar(hoja, fila, fin)
+    ultima = fila - 1
+    return ultima if ultima >= inicio else None
+
+
+def _mapear_columnas_balance(filas) -> tuple:
+    """Devuelve (indice_de_fila_encabezado, {col_origen: col_destino}).
+
+    Recorre las primeras 15 filas buscando una que contenga 'Cta.mayor':
+    esa es la fila de encabezado del balance de SAP. Dentro de ella, cada
+    etiqueta conocida se resuelve a la columna donde la plantilla la espera.
+    Etiquetas no reconocidas (los separadores del export) se descartan.
+    """
+    for indice, fila in enumerate(filas[:15]):
+        etiquetas = {}
+        for pos, celda in enumerate(fila):
+            texto = str(celda).strip() if celda is not None else ""
+            if texto:
+                etiquetas[texto] = pos
+        if "Cta.mayor" not in etiquetas:
+            continue
+        mapa = {}
+        for alias, destino in _COLUMNAS_BALANCE:
+            for etiqueta in alias:
+                if etiqueta in etiquetas:
+                    mapa[etiquetas[etiqueta]] = destino
+                    break
+        return indice, mapa
+    return 0, None
+
+
+def _escribir_encabezado_alineado(hoja, fila: int, mapa: dict,
+                                  encabezados) -> None:
+    for col_origen, col_destino in mapa.items():
+        if col_origen >= len(encabezados):
+            continue
+        celda = hoja.cell(row=fila, column=col_destino)
+        if _escribible(celda):
+            celda.value = encabezados[col_origen]
 
 
 def _sellar_balance_con_subtotales(hoja, encabezado: int,
@@ -747,6 +865,11 @@ def depositar(ctx, destino, plantilla: Path = None,
     # ids de las demas hojas y aterrizan contenidos cambiados.
     if "BORRADOR TERLICA" in libro.sheetnames:
         libro["BORRADOR TERLICA"].sheet_state = "hidden"
+    # 'Pago' tampoco se usa (auditor lo confirmo en la revision). Mismo
+    # criterio que con BORRADOR TERLICA: se oculta, no se elimina --
+    # fidelidad.py restaura las hojas desde el paquete original.
+    if "Pago" in libro.sheetnames:
+        libro["Pago"].sheet_state = "hidden"
     _depositar_revision_ica(libro, ctx)
     _depositar_cruce_universal(libro, ctx, total_declarado_confirmado)
     _depositar_conclusiones(libro, ctx)
