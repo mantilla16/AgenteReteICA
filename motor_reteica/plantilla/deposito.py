@@ -655,14 +655,26 @@ def _depositar_facturas(libro, ctx) -> None:
     inicio, fin = _FACTURAS[1], _FACTURAS[2]
     _limpiar(hoja, inicio, fin, range(2, 12))
 
+    # Mismo resolver que usa C11 -- match tolerante a prefijos, ceros a la
+    # izquierda y sufijos de sucursal. Si aca se hiciera match exacto, la
+    # hoja saldria sin proveedor ni concepto para toda factura cuyo PDF
+    # se guardo con nombre distinto de la referencia SAP -- que es lo
+    # tipico cuando el PDF se descarga con nombre humano
+    # ('Factura electronica OP portuaria 250530.pdf').
+    from motor_reteica.controles import _resolver_linea_de_factura
     por_referencia = {l.referencia: l for l in ctx.lineas}
     fila = inicio
     for factura in ctx.facturas or []:
-        linea = por_referencia.get(factura.numero)
+        linea = _resolver_linea_de_factura(factura.numero, por_referencia)
         tarifa = (ctx.municipio.tarifa_por_cuenta.get(linea.cuenta)
                   if linea else None)
         hoja.cell(row=fila, column=2, value=linea.documento if linea else None)
-        hoja.cell(row=fila, column=3, value=factura.numero)
+        # Cuando hay linea, se usa SU referencia (limpia) en vez del nombre
+        # completo del PDF. Robinson leia '250530' en su papel manual, no
+        # 'Factura electronica OP portuaria 250530.pdf'. Si no hay linea,
+        # se cae al nombre del archivo como pista para el auditor.
+        hoja.cell(row=fila, column=3,
+                  value=linea.referencia if linea else factura.numero)
         hoja.cell(row=fila, column=4, value=factura.fecha)
         hoja.cell(row=fila, column=5, value=linea.tercero if linea else None)
         hoja.cell(row=fila, column=6, value=linea.concepto if linea else None)
