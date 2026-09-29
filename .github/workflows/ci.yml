@@ -13,11 +13,11 @@ on:
 
 jobs:
   pruebas:
-    # Corre en TU runner self-hosted (el que tienes en el servidor). Si el
-    # runner esta apagado o no registrado en este repo, el job queda en cola
-    # hasta que vuelva. Para correr en la nube de GitHub, cambiar esta linea
-    # por:  runs-on: ubuntu-latest
-    runs-on: self-hosted
+    # Corre en la nube de GitHub (gratis, sin servidor propio). Estas pruebas no
+    # necesitan la red interna, asi que la nube alcanza. Para usar TU runner del
+    # servidor: registralo en Settings > Actions > Runners de este repo y cambia
+    # esta linea por:  runs-on: self-hosted
+    runs-on: ubuntu-latest
 
     steps:
       - name: Traer el codigo
