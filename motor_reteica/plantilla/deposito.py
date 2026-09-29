@@ -289,20 +289,57 @@ def _depositar_balance(libro, ctx) -> None:
     _limpiar(hoja, inicio, fin, range(1, 16))
     ultima = _pegar_alineado(hoja, (ctx.rutas or {}).get("balance"),
                              inicio, fin, _COLUMNAS_BALANCE,
-                             marca_encabezado="Cta.mayor")
+                             marca_encabezado="Cta.mayor",
+                             copiar_cabecera=True)
     if ultima is None:
         return
     _sellar_balance_con_subtotales(hoja, encabezado=inicio - 1,
                                    primera_dato=inicio, ultima_dato=ultima)
 
 
+def _copiar_cabecera_fuente(hoja, filas, idx_encabezado, inicio) -> None:
+    """Copia las lineas de cabecera del export (nombre de la empresa, periodos,
+    hora/fecha) a las filas que la plantilla reserva ENCIMA del encabezado.
+
+    La plantilla trae horneada la cabecera de TERLICA (la primera prueba); sin
+    esto, el balance de cualquier otra empresa salia con el nombre y los
+    periodos de TERLICA. La cabecera es EVIDENCIA y varia por empresa, asi que
+    se reemplaza por la del archivo que de verdad se pego.
+    """
+    filas_destino = list(range(1, inicio - 1))     # 1 .. inicio-2
+    if not filas_destino:
+        return
+    # Limpiar lo que la plantilla traia en esas filas (datos de otro cliente).
+    for fila in filas_destino:
+        for columna in range(1, 16):
+            celda = hoja.cell(row=fila, column=columna)
+            if _escribible(celda):
+                celda.value = None
+    # Las lineas del export antes de su encabezado, alineadas abajo (junto al
+    # encabezado) para que no queden flotando si el archivo trae menos lineas.
+    metadatos = [f for f in filas[:idx_encabezado]
+                 if any(c not in (None, "") for c in f)]
+    metadatos = metadatos[-len(filas_destino):]
+    for fila, fila_src in zip(filas_destino[len(filas_destino) - len(metadatos):],
+                              metadatos):
+        texto = next((str(c).strip() for c in fila_src if c not in (None, "")), "")
+        celda = hoja.cell(row=fila, column=2)
+        if texto and _escribible(celda):
+            celda.value = texto
+
+
 def _pegar_alineado(hoja, ruta, inicio: int, fin: int,
-                    columnas_destino, marca_encabezado: str):
+                    columnas_destino, marca_encabezado: str,
+                    copiar_cabecera: bool = False):
     """Pega la fuente con las columnas alineadas al layout de la plantilla.
 
     `columnas_destino`: tupla de (etiquetas_alias, columna_destino_1based).
     `marca_encabezado`: etiqueta que identifica la fila de encabezado del
       archivo (ej. 'Cta.mayor' para balance, 'Cuenta' para auxiliar).
+    `copiar_cabecera`: si True, copia las lineas de cabecera del export (nombre
+      de empresa, periodos) encima del encabezado, reemplazando las que la
+      plantilla trae horneadas de otro cliente. Solo el balance lo usa; en AUX
+      FISCAL esas filas son titulos fijos de la plantilla, no del cliente.
 
     Devuelve el numero de la ultima fila escrita, o None si no hubo datos.
     """
@@ -335,6 +372,8 @@ def _pegar_alineado(hoja, ruta, inicio: int, fin: int,
         # pegue algo.
         return _pegar_fuente_completa(hoja, ruta, inicio, fin)
 
+    if copiar_cabecera:
+        _copiar_cabecera_fuente(hoja, filas, idx_encabezado, inicio)
     _escribir_encabezado_alineado(hoja, inicio - 1, mapa, filas[idx_encabezado])
 
     datos = filas[idx_encabezado + 1:]
