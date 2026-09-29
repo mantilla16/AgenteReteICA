@@ -603,10 +603,16 @@ def _depositar_check_list(libro, ctx) -> None:
     hoja["D3"] = _nit_con_dv(ctx.nit)
     hoja["D6"] = "Revisión Reteica"
     hoja["D7"] = _MESES[mes - 1]
-    try:
-        hoja["D5"] = ctx.municipio.vencimiento(ctx.periodo)
-    except KeyError:
-        hoja["D5"] = None
+    # La fecha maxima sale del PROPIO borrador (la trae impresa). Solo si el PDF
+    # no la trajo se cae al calendario del municipio, y si ese tampoco la tiene,
+    # queda vacia -- nunca se inventa.
+    fecha_maxima = getattr(ctx.borrador, "fecha_maxima", None)
+    if fecha_maxima is None:
+        try:
+            fecha_maxima = ctx.municipio.vencimiento(ctx.periodo)
+        except KeyError:
+            fecha_maxima = None
+    hoja["D5"] = fecha_maxima
 
     # El motor prepara el papel, asi que firma como ELABORADO POR. NUNCA
     # llena REVISADO POR: escribir ahi un nombre seria fabricar evidencia de

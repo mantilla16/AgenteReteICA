@@ -30,6 +30,7 @@ que ya existia de verdad ataja este caso.
 
 import re
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
@@ -37,6 +38,7 @@ import pdfplumber
 
 _RE_ACTIVIDAD = re.compile(r"^(\d{4}) - (.+?) (\d+) ([\d.]+) ([\d.]+)$")
 _RE_RENGLON = re.compile(r"^(\d{2}) \D.*?([\d.]+)$")
+_RE_FECHA = re.compile(r"^(\d{2})/(\d{2})/(\d{4})$")
 _MARCA = "☒"
 _VACIA = "☐"
 
@@ -61,6 +63,10 @@ class Borrador:
     renglones: dict
     actividades: list
     firma_revisor_fiscal: bool
+    # Fecha maxima de presentacion/pago que trae impresa el propio formulario.
+    # Es la fuente correcta -- cada declaracion la trae -- en vez de un
+    # calendario cableado por municipio que habria que actualizar cada mes.
+    fecha_maxima: date = None
 
 
 def _a_decimal(texto: str) -> Decimal:
@@ -69,13 +75,50 @@ def _a_decimal(texto: str) -> Decimal:
 
 def _periodo(lineas: list) -> tuple:
     anio = next(int(l.split()[-1]) for l in lineas if l.startswith("AÑO GRAVABLE 2"))
-    fila = next(l for l in lineas if l.count(_VACIA) + l.count(_MARCA) == 7)
-    mes = fila.split().index(_MARCA) + 1
+
+    # La fila de PERIODO trae una casilla por mes. Antes se exigia == 7 casillas
+    # (el formulario de julio de TERLICA, ENE-JUL). El de agosto de ZFT trae 8
+    # (ENE-AGO), y en general cada mes puede traer un numero distinto: el que
+    # exigia 7 hacia fallar todo el lector con StopIteration y el papel salia
+    # vacio. Ahora se toma la fila con MAS casillas que ademas trae la marcada.
+    candidatas = [l for l in lineas
+                  if _MARCA in l and (l.count(_VACIA) + l.count(_MARCA)) >= 2]
+    fila = max(candidatas, key=lambda l: l.count(_VACIA) + l.count(_MARCA))
+
+    # El mes = cuantas casillas hay hasta la marcada, inclusive. Se cuentan solo
+    # los tokens de casilla (la fila puede traer basura del codigo de barras
+    # despues de las casillas, que index() no debe confundir).
+    mes = 0
+    for token in fila.split():
+        if token in (_VACIA, _MARCA):
+            mes += 1
+            if token == _MARCA:
+                break
     return anio, "%d-%02d" % (anio, mes)
 
 
 def _valor_siguiente(lineas: list, etiqueta: str) -> str:
     return lineas[lineas.index(etiqueta) + 1]
+
+
+def _fecha_maxima(lineas: list):
+    """La fecha maxima de presentacion/pago impresa en el formulario.
+
+    Aparece como una linea dd/mm/aaaa justo despues del rotulo 'FECHA MAXIMA
+    DE PRESENTACION Y/O PAGO'. None si el PDF no la trae legible.
+    """
+    for i, linea in enumerate(lineas):
+        u = linea.upper()
+        if "FECHA" in u and ("MAXIMA" in u or "MÁXIMA" in u):
+            for siguiente in lineas[i + 1:i + 4]:
+                m = _RE_FECHA.match(siguiente.strip())
+                if m:
+                    dia, mes, anio = (int(x) for x in m.groups())
+                    try:
+                        return date(anio, mes, dia)
+                    except ValueError:
+                        return None
+    return None
 
 
 def leer_borrador(ruta: Path) -> Borrador:
@@ -120,4 +163,5 @@ def leer_borrador(ruta: Path) -> Borrador:
         renglones=renglones,
         actividades=actividades,
         firma_revisor_fiscal=any("FRMA_RVSR_FSCL" in l for l in lineas),
+        fecha_maxima=_fecha_maxima(lineas),
     )
