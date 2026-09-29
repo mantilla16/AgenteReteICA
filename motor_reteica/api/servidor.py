@@ -571,6 +571,20 @@ def _resumen(ctx) -> dict:
 # API routes
 # --------------------------------------------------------------------------
 
+# El periodo tiene que venir como AAAA-MM: todo el motor lo parte en anio y mes
+# con periodo.split("-"). Sin el mes (p.ej. "2026"), esa division fallaba dentro
+# de la revision con "not enough values to unpack", un error crudo y tardio. Se
+# valida en la entrada para dar un mensaje claro antes de arrancar nada.
+_RE_PERIODO = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
+
+
+def _validar_periodo(periodo: str) -> None:
+    if not _RE_PERIODO.match((periodo or "").strip()):
+        raise HTTPException(
+            400, "El periodo debe tener formato AAAA-MM, por ejemplo 2026-08. "
+                 "Recibido: %r" % periodo)
+
+
 @app.post("/analizar")
 async def analizar(
     request: Request,
@@ -585,6 +599,7 @@ async def analizar(
     usa: ahora los documentos se suben uno a uno a un encargo, que ademas
     sobrevive a la revision para poder completarlo.
     """
+    _validar_periodo(periodo)
     enc = _nuevo_encargo(request)
     carpeta = _carpeta_encargo(enc)
     for subida in archivos:

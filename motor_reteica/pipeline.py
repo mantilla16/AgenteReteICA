@@ -233,8 +233,21 @@ def _borrador_o_esqueleto(ruta, nit_fallback: str, periodo_fallback: str,
         pass
 
     universal = leer_borrador_universal(ruta)
+
+    # El lector universal a veces solo saca el ANIO del PDF (no reconoce el mes:
+    # sin checkbox, sin "PERIODO N", sin mes escrito), y devuelve "2026". Ese
+    # valor a medias pisaba el periodo que el auditor declaro y hacia fallar C0
+    # con "el borrador es del periodo 2026 y se esperaba 2026-08". El auditor es
+    # la autoridad sobre que periodo revisa: si la extraccion solo trajo el anio
+    # y ese anio coincide con el declarado, se adopta el del auditor (que si
+    # trae mes). Si el anio NO coincide, se deja lo extraido y C0 lo detecta.
+    periodo_borrador = universal.periodo or periodo_fallback
+    if periodo_borrador and "-" not in periodo_borrador:
+        if periodo_borrador == (periodo_fallback or "").split("-")[0]:
+            periodo_borrador = periodo_fallback
+
     try:
-        anio = int((universal.periodo or "1900-01").split("-")[0])
+        anio = int((periodo_borrador or "1900-01").split("-")[0])
     except ValueError:
         anio = 1900
     return Borrador(
@@ -242,7 +255,7 @@ def _borrador_o_esqueleto(ruta, nit_fallback: str, periodo_fallback: str,
         razon_social="",
         municipio=universal.municipio or municipio_fallback,
         anio=anio,
-        periodo=universal.periodo or periodo_fallback,
+        periodo=periodo_borrador,
         numero_formulario="",
         renglones={},
         actividades=[],
