@@ -9,7 +9,8 @@ from decimal import Decimal
 from pathlib import Path
 
 from motor_reteica.ingesta._io import leer_filas
-from motor_reteica.parametros.columnas import FIRMA_BALANCE, ROLES_BALANCE, localizar_columnas
+from motor_reteica.parametros.columnas import (
+    ColumnaNoIdentificada, FIRMA_BALANCE, ROLES_BALANCE, localizar_columnas)
 from motor_reteica.parametros.puc import CUENTA_RETEICA, es_cuenta_reteica
 
 
@@ -39,7 +40,16 @@ def leer_acumulados(ruta: Path) -> dict:
     puede verificar.
     """
     filas = leer_filas(ruta, hoja="BALANCE")
-    inicio, col = localizar_columnas(filas, ROLES_BALANCE, FIRMA_BALANCE)
+    try:
+        inicio, col = localizar_columnas(filas, ROLES_BALANCE, FIRMA_BALANCE)
+    except ColumnaNoIdentificada:
+        # Formato de ERP no reconocido por firma (SAP B1 y otros): en esos
+        # exports el saldo acumulado por cuenta vive en filas resumen, no en las
+        # de transaccion, y derivarlo bien exige logica propia del formato. Se
+        # degrada a vacio: M11 (contrapartida automatica) queda sin auto-deteccion
+        # y el auditor la declara por atestacion. Es la verdad del papel -- no
+        # detectamos la naturaleza -- no una afirmacion falsa.
+        return {}
     columna = _columna_acumulado(filas, inicio)
     if columna is None:
         return {}
@@ -63,7 +73,10 @@ def leer_naturalezas(ruta: Path) -> dict:
     una lista que alguien olvida llenar.
     """
     filas = leer_filas(ruta, hoja="BALANCE")
-    inicio, col = localizar_columnas(filas, ROLES_BALANCE, FIRMA_BALANCE)
+    try:
+        inicio, col = localizar_columnas(filas, ROLES_BALANCE, FIRMA_BALANCE)
+    except ColumnaNoIdentificada:
+        return {}   # ver nota en leer_acumulados: se degrada, no se revienta
 
     columna_acumulado = _columna_acumulado(filas, inicio)
     if columna_acumulado is None:
@@ -79,9 +92,29 @@ def leer_naturalezas(ruta: Path) -> dict:
     return naturalezas
 
 
+def _deteccion_dinamica(filas):
+    """Deteccion por contenido para balances de ERP no vistos (SAP B1, etc.).
+
+    Devuelve la Deteccion solo si trae cuenta y una columna de movimiento; si
+    no, None, para que el llamador decida (no reventar el pipeline por un
+    balance de formato ajeno).
+    """
+    from motor_reteica.ingesta.deteccion import detectar
+    d = detectar(filas, tipo_esperado="balance")
+    tiene_mov = "credito" in d.columnas or "importe" in d.columnas
+    return d if ("cuenta" in d.columnas and tiene_mov) else None
+
+
 def leer_balance(ruta: Path, excluidas=()) -> dict:
     filas = leer_filas(ruta, hoja="BALANCE")
-    inicio, col = localizar_columnas(filas, ROLES_BALANCE, FIRMA_BALANCE)
+    try:
+        inicio, col = localizar_columnas(filas, ROLES_BALANCE, FIRMA_BALANCE)
+    except ColumnaNoIdentificada:
+        d = _deteccion_dinamica(filas)
+        if d is None:
+            raise
+        from motor_reteica.ingesta.adaptador import leer_saldos
+        return leer_saldos(filas, d, excluidas)
 
     saldos = {}
     for fila in filas[inicio + 1:]:

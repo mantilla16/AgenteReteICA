@@ -45,13 +45,19 @@ def verificar_tipo_documento(rol: str, ruta: Path) -> None:
     hoja = "BALANCE" if rol == "balance" else None
     filas = leer_filas(ruta, hoja=hoja)
     detectado = detectar_tipo_documento(filas)
-    if detectado != rol:
+
+    # detectado is None => la firma rigida no reconoce el formato (ERP no visto,
+    # p.ej. SAP B1). NO se aborta: el detector por contenido lo leera y la
+    # bateria de cuadres validara el mapeo aguas abajo. Antes esto reventaba con
+    # cualquier ERP nuevo. La distincion auxiliar/balance por contenido no es
+    # fiable (en SAP B1 comparten layout), por eso el gate solo rechaza cuando
+    # la firma RIGIDA reconoce un tipo conocido distinto del declarado -- ese si
+    # es el error real: el auditor puso un balance en el slot del auxiliar.
+    if detectado is not None and detectado != rol:
         raise IdentidadIncompatible(
             "el manifiesto declara '%s' en el rol '%s', pero la estructura "
             "de ese archivo corresponde a %s, no a %s"
-            % (Path(ruta).name, rol,
-               "'%s'" % detectado if detectado else "un tipo de documento no reconocido",
-               rol))
+            % (Path(ruta).name, rol, "'%s'" % detectado, rol))
 
 
 def verificar_identidad(borrador, lineas, nit_esperado: str,

@@ -374,6 +374,12 @@ _MARCAS_FACTURA_ENCABEZADO = (
     "REPRESENTACION GRAFICA DE LA FACTURA",
     "AUTORIZACION DE FACTURACION",
     "NUM. DE FACTURACION DIAN",
+    # Documento soporte DIAN en adquisiciones a NO obligados a facturar: es el
+    # comprobante de pago a un profesional independiente (honorarios, etc.). Para
+    # la muestra de retencion es equivalente a una factura -- el mismo DE-xxx
+    # aparece en el auxiliar y sostiene la misma prueba de C11. Sin esta marca,
+    # como el cuerpo dice "Rete ICA", caia clasificado como borrador.
+    "DOCUMENTO SOPORTE",
 )
 
 
@@ -418,7 +424,8 @@ def _sin_acentos(cadena: str) -> str:
                   .replace("Á", "A").replace("Ú", "U").replace("Ñ", "N"))
 
 
-_MARCAS_DE_FACTURA = ("FACTURA", "FACTURA ELECTRONICA", "FACTURA DE VENTA")
+_MARCAS_DE_FACTURA = ("FACTURA", "FACTURA ELECTRONICA", "FACTURA DE VENTA",
+                      "DOCUMENTO SOPORTE")
 
 
 def _es_factura_pdf(ruta: Path) -> bool:

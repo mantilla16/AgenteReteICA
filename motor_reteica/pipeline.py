@@ -250,6 +250,33 @@ def _borrador_o_esqueleto(ruta, nit_fallback: str, periodo_fallback: str,
     )
 
 
+def _municipio_con_tarifas_derivadas(municipio, rutas, presentes):
+    """Completa tarifa_por_cuenta con las tarifas derivadas del auxiliar/balance.
+
+    Las del municipio mandan (son autoritativas); las derivadas solo AGREGAN
+    cuentas que faltaban. Si no se puede derivar nada, devuelve el municipio tal
+    cual. Frozen dataclass -> se reemplaza con dataclasses.replace.
+    """
+    import dataclasses
+    from motor_reteica.ingesta.adaptador import tarifas_de_ruta
+
+    derivadas = {}
+    if "auxiliar" in presentes:
+        derivadas.update(tarifas_de_ruta(rutas["auxiliar"], "auxiliar"))
+    if "balance" in presentes:
+        derivadas.update(tarifas_de_ruta(rutas["balance"], "balance"))
+    if not derivadas:
+        return municipio
+
+    fusionada = {**derivadas, **dict(municipio.tarifa_por_cuenta)}
+    if fusionada == municipio.tarifa_por_cuenta:
+        return municipio
+    try:
+        return dataclasses.replace(municipio, tarifa_por_cuenta=fusionada)
+    except TypeError:
+        return municipio   # objeto no-dataclass; se deja intacto
+
+
 def revisar(carpeta, nit, periodo, municipio,
             cliente_ia=None) -> ContextoRevision:
     carpeta = Path(carpeta)
@@ -310,6 +337,13 @@ def revisar(carpeta, nit, periodo, municipio,
     saldos = (leer_balance(rutas["balance"], excluidas_efectivas)
               if "balance" in presentes else None)
     filas_erp = leer_sap_retenciones(rutas["erp"]) if "erp" in presentes else None
+
+    # Tarifa por cuenta: el dict del municipio es autoritativo para las cuentas
+    # que conoce (Santa Marta trae 2368010xxx). Para sub-cuentas de otro ERP que
+    # no estan ahi (SAP B1: 2368050301...), la tarifa se DERIVA del nombre de la
+    # cuenta ("...5x1000" -> 0.005) y se fusiona SIN pisar las del municipio. Asi
+    # el motor no depende de un dict por cliente y no revienta con KeyError.
+    municipio = _municipio_con_tarifas_derivadas(municipio, rutas, presentes)
 
     # C15 y la mitad legible de C12. El formato historico del cliente trae una
     # hoja por periodo con lo que declaro cada mes.

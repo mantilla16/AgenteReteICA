@@ -75,9 +75,46 @@ def leer_auxiliar(ruta: Path) -> list:
         if _tiene_firma(filas, firma):
             return _leer_agregado(filas, firma)
 
-    # Ninguna firma: el reader de siempre lanza ColumnaNoIdentificada con
-    # las etiquetas disponibles para que el auditor sepa que corregir.
-    return _leer_rico(filas)
+    # Ninguna firma conocida: se cae al DETECTOR DINAMICO, que reconoce el
+    # formato por contenido (otro ERP, p.ej. SAP Business One). El mapeo se
+    # valida con la bateria de cuadres antes de confiar en el; si no cuadra,
+    # se lanza ColumnaNoIdentificada para que el pipeline lo muestre.
+    return _leer_dinamico(filas)
+
+
+def _leer_dinamico(filas: list) -> list:
+    """Ultimo recurso: detectar el formato por contenido y validarlo.
+
+    Reconoce ERPs no vistos (SAP Business One, etc.) sin codigo por cliente. La
+    deteccion propone el mapeo; la bateria de cuadres decide si es de fiar. Un
+    mapeo que no cuadra se rechaza con ColumnaNoIdentificada -- nunca se leen
+    lineas sobre columnas dudosas.
+    """
+    from motor_reteica.ingesta.deteccion import detectar
+    from motor_reteica.ingesta.cuadres import validar_deteccion, es_confiable
+    from motor_reteica.ingesta.adaptador import leer_lineas
+    from motor_reteica.parametros.columnas import ColumnaNoIdentificada
+
+    d = detectar(filas, tipo_esperado="auxiliar")
+    if "cuenta" not in d.columnas or _columna_retencion_ausente(d):
+        raise ColumnaNoIdentificada(
+            "auxiliar",
+            "no se identifico la cuenta o el importe de retencion por contenido",
+            d.etiquetas)
+    cuadres = validar_deteccion(filas, d)
+    if not es_confiable(cuadres):
+        fallo = next(c for c in cuadres if not c.cuadra)
+        raise ColumnaNoIdentificada(
+            "auxiliar",
+            "el mapeo detectado no cuadra (%s): %s" % (fallo.nombre, fallo.detalle),
+            d.etiquetas)
+    return leer_lineas(filas, d)
+
+
+def _columna_retencion_ausente(d) -> bool:
+    if d.convencion_signo == "columnas_separadas":
+        return "credito" not in d.columnas
+    return "importe" not in d.columnas
 
 
 def _tiene_firma(filas, firma) -> bool:

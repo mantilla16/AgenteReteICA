@@ -786,6 +786,120 @@ def _depositar_borrador_terlica(libro, ctx) -> None:
                         "El total de arriba NO los incluye." % detalle)
 
 
+# Layout de la cedula de cuentas en REVISION ICA (columnas K:O). La tabla y el
+# bloque de retencion comparten filas con el formulario de renglones (columnas
+# A:I), asi que NO se pueden insertar filas: se escribe en las celdas K:O libres.
+# Limites fisicos de la plantilla actual:
+#   - tabla de cuentas: filas 12..14 (hasta 3 cuentas) + fila de sumas.
+#   - bloque de retencion: filas 17..20 (hasta 4 tarifas), porque M21=SUM(M17:M20)
+#     alimenta D20. Mas alla de eso habria que rediseñar la hoja.
+_REV_TABLA_FILA_1 = 12
+_REV_TABLA_MAX = 3          # cuentas que caben antes del encabezado de retencion (16)
+_REV_RET_FILA_1 = 17
+_REV_RET_MAX = 4            # tarifas que caben en M17:M20
+_REV_COL_CUENTA, _REV_COL_DESC = 11, 12      # K, L
+_REV_COL_DEBITO, _REV_COL_CREDITO, _REV_COL_SALDO = 13, 14, 15   # M, N, O
+
+
+def _depositar_cedula_cuentas(hoja, ctx) -> None:
+    """La cedula de cuentas 2368 del papel, DINAMICA por las cuentas del mes.
+
+    Antes esto estaba cableado a dos cuentas (2368010007 y 2368010010, las de
+    TERLICA). Cualquier cliente con otras sub-cuentas (ZFT trae 005/007/010, y
+    otro ERP como SAP B1 trae 2368050301/02/03) quedaba con la cedula
+    incompleta o en blanco. Ahora se escribe una fila por cada cuenta que el
+    balance trajo, con su tarifa derivada del municipio (que a su vez la deriva
+    del nombre de la cuenta), y el bloque de retencion se regenera por tarifa.
+
+    Las celdas N son NUMERICAS (O hace =ROUND(N-M,-3) y las sumas dependen de
+    ellas): un texto ahi propaga #!VALOR! por la hoja. Por eso una cuenta sin
+    saldo deja N vacia (que en Excel no afirma cero) y la falta se DICE en la
+    columna P, libre, donde nadie calcula.
+    """
+    # Limpiar el rango que la plantilla trae cableado, para no dejar residuo de
+    # las cuentas de TERLICA cuando el cliente tiene otras.
+    for fila in range(_REV_TABLA_FILA_1, 16):
+        for col in (_REV_COL_CUENTA, _REV_COL_DESC, _REV_COL_DEBITO,
+                    _REV_COL_CREDITO, _REV_COL_SALDO):
+            hoja.cell(row=fila, column=col).value = None
+    for fila in range(_REV_RET_FILA_1, _REV_RET_FILA_1 + _REV_RET_MAX):
+        for col in (_REV_COL_CUENTA, _REV_COL_DESC, _REV_COL_DEBITO):
+            hoja.cell(row=fila, column=col).value = None
+    hoja["P12"] = None
+
+    if ctx.saldos is None:
+        hoja["P12"] = "SIN BALANCE DE PRUEBA: no se pudo tomar el saldo"
+        return
+
+    tarifas_cuenta = ctx.municipio.tarifa_por_cuenta
+    # Solo las cuentas CON movimiento del periodo. Una cuenta 2368 en cero no
+    # tuvo retencion este mes: mostrarla es ruido y consume filas de la cedula.
+    # (TERLICA trae 002/005/007/008/010 en el balance, pero solo 007 y 010 con
+    # saldo; la cedula muestra esas dos, igual que a mano.)
+    cuentas = sorted(c for c in ctx.saldos if ctx.saldos[c] != 0)
+    if not cuentas:
+        hoja["P12"] = "EL BALANCE NO TRAE CUENTAS 2368 CON MOVIMIENTO"
+        return
+
+    notas = []
+    if len(cuentas) > _REV_TABLA_MAX:
+        notas.append("la plantilla reserva %d filas de cuenta y el balance trae "
+                     "%d (%s): la cedula requiere ampliar REVISION ICA"
+                     % (_REV_TABLA_MAX, len(cuentas), ", ".join(cuentas)))
+        cuentas = cuentas[:_REV_TABLA_MAX]
+
+    # Tabla de cuentas: una fila por cuenta.
+    fila = _REV_TABLA_FILA_1
+    for cuenta in cuentas:
+        tarifa = tarifas_cuenta.get(cuenta)
+        hoja.cell(row=fila, column=_REV_COL_CUENTA, value=int(cuenta))
+        hoja.cell(row=fila, column=_REV_COL_DESC,
+                  value=_texto_de_cuenta(tarifa) if tarifa is not None
+                  else "Cuenta %s" % cuenta)
+        hoja.cell(row=fila, column=_REV_COL_CREDITO, value=int(ctx.saldos[cuenta]))
+        hoja.cell(row=fila, column=_REV_COL_SALDO,
+                  value="=ROUND(+N%d-M%d,-3)" % (fila, fila))
+        fila += 1
+
+    ultima = fila - 1
+    fila_sumas = fila
+    hoja.cell(row=fila_sumas, column=_REV_COL_CREDITO,
+              value="=SUM(N%d:N%d)" % (_REV_TABLA_FILA_1, ultima))
+    hoja.cell(row=fila_sumas, column=_REV_COL_SALDO,
+              value="=SUM(O%d:O%d)" % (_REV_TABLA_FILA_1, ultima))
+    # E20 (retencion contable de la firma) suma los Saldos de la cedula.
+    hoja["E20"] = "=+O%d" % fila_sumas
+
+    # Bloque de retencion: una fila por TARIFA distinta, de mayor a menor (como
+    # la plantilla: 0.010 antes que 0.007). L = suma de los N (credito) de las
+    # cuentas con esa tarifa; M = base = ROUND(L/tarifa,-3).
+    filas_por_tarifa = {}
+    for indice, cuenta in enumerate(cuentas):
+        tarifa = tarifas_cuenta.get(cuenta)
+        if tarifa is None:
+            notas.append("sin tarifa para %s: no entra al calculo de base" % cuenta)
+            continue
+        filas_por_tarifa.setdefault(tarifa, []).append(_REV_TABLA_FILA_1 + indice)
+
+    tarifas_ordenadas = sorted(filas_por_tarifa, reverse=True)
+    if len(tarifas_ordenadas) > _REV_RET_MAX:
+        notas.append("hay %d tarifas y la plantilla reserva %d filas de retencion"
+                     % (len(tarifas_ordenadas), _REV_RET_MAX))
+        tarifas_ordenadas = tarifas_ordenadas[:_REV_RET_MAX]
+
+    fila = _REV_RET_FILA_1
+    for tarifa in tarifas_ordenadas:
+        refs = "+".join("N%d" % f for f in filas_por_tarifa[tarifa])
+        hoja.cell(row=fila, column=_REV_COL_CUENTA, value=float(tarifa))
+        hoja.cell(row=fila, column=_REV_COL_DESC, value="=+%s" % refs)
+        hoja.cell(row=fila, column=_REV_COL_DEBITO,
+                  value="=ROUND(+L%d/K%d,-3)" % (fila, fila))
+        fila += 1
+
+    if notas:
+        hoja["P12"] = " | ".join(notas)
+
+
 def _depositar_revision_ica(libro, ctx) -> None:
     """D11 y D12.
 
@@ -820,27 +934,7 @@ def _depositar_revision_ica(libro, ctx) -> None:
     """
     hoja = libro["REVISION ICA"]
 
-    # El saldo que el motor ya leyo del balance. Si la cuenta no esta, se
-    # DICE; antes el VLOOKUP daba #N/A, que era ruidoso a proposito, y un
-    # cero mudo en su lugar seria justo lo que este proyecto no acepta.
-    # N12 y N13 son celdas NUMERICAS: O12 hace =ROUND(+N12-M12,-3) y N14 las
-    # suma. Escribir texto ahi --por bienintencionado que sea-- produce
-    # #!VALOR! y el error se propaga por toda la hoja. La falta se DICE, pero
-    # en P, que es columna libre y nadie calcula sobre ella; la celda numerica
-    # queda VACIA, que en Excel no afirma un saldo de cero.
-    faltantes = []
-    for celda, cuenta in (("N12", "2368010007"), ("N13", "2368010010")):
-        saldo = None if ctx.saldos is None else ctx.saldos.get(cuenta)
-        if saldo is None:
-            hoja[celda] = None
-            faltantes.append(cuenta)
-        else:
-            hoja[celda] = int(saldo)
-
-    if faltantes:
-        hoja["P12"] = ("SIN BALANCE DE PRUEBA: no se pudo tomar el saldo"
-                       if ctx.saldos is None else
-                       "NO ESTA EN EL BALANCE: %s" % ", ".join(faltantes))
+    _depositar_cedula_cuentas(hoja, ctx)
 
     # Lo declarado: se suman TODAS las actividades del borrador, no la celda
     # del total de la hoja. Si el borrador trae siete actividades en vez de
