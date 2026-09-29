@@ -36,3 +36,17 @@ jobs:
 
       - name: Correr las pruebas
         run: pytest -q
+
+  deploy:
+    # Despliega en el servidor de produccion. CANDADO: 'needs: pruebas' hace que
+    # este job SOLO corra si las pruebas pasaron verde -- nunca se despliega
+    # codigo roto. Y solo en push a main (no en Pull Requests).
+    needs: pruebas
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Corre en el runner self-hosted del propio servidor. Ese runner ejecuta el
+    # script root-owned /usr/local/bin/reteica-deploy (git pull + pip + restart)
+    # via una regla de sudo puntual y sin contraseña.
+    runs-on: self-hosted
+    steps:
+      - name: Actualizar y reiniciar la app
+        run: sudo /usr/local/bin/reteica-deploy
