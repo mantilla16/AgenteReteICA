@@ -411,7 +411,13 @@ def detectar(filas, tipo_esperado=None) -> Deteccion:
     cuando el llamador ya sabe que rol cumple el archivo (lo sabe por el
     manifiesto/wizard). Si es None, se infiere.
     """
-    filas = [f for f in filas if any(c not in (None, "") for c in f)] or [[]]
+    # OJO: NO se filtran las filas vacias. Antes se filtraban y se reindexaba,
+    # pero los lectores (adaptador, cuadres) usan la lista ORIGINAL con
+    # d.fila_encabezado: si el archivo trae filas vacias antes del encabezado
+    # (SAP suele dejar 5), los indices quedaban corridos y se leian 0 lineas.
+    # _detectar_encabezado ya ignora las vacias (puntuan 0), asi que operar
+    # sobre la lista original es correcto y mantiene los indices validos.
+    filas = filas or [[]]
     inicio = _detectar_encabezado(filas)
     encabezado = filas[inicio] if inicio < len(filas) else []
 

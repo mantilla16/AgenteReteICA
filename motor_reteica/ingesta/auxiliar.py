@@ -112,9 +112,9 @@ def _leer_dinamico(filas: list) -> list:
 
 
 def _columna_retencion_ausente(d) -> bool:
-    if d.convencion_signo == "columnas_separadas":
-        return "credito" not in d.columnas
-    return "importe" not in d.columnas
+    # La retencion es el HABER: credito si existe (SAP B1, o un papel con
+    # 'Retencion'), si no la columna unica con signo ('Importe en ML').
+    return "credito" not in d.columnas and "importe" not in d.columnas
 
 
 def _tiene_firma(filas, firma) -> bool:

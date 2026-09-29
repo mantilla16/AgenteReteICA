@@ -440,6 +440,37 @@ def _es_factura_pdf(ruta: Path) -> bool:
     return any(marca in sin_tildes for marca in _MARCAS_DE_FACTURA)
 
 
+def _rol_por_contenido(ruta: Path):
+    """Reconoce el rol por CONTENIDO cuando la firma rigida no lo hace.
+
+    Escanea todas las hojas del libro (el auxiliar puede venir en cualquier
+    hoja, no solo la primera) y devuelve el rol de la hoja que valida contra la
+    bateria de cuadres. Asi el motor reconoce ERPs no vistos (SAP B1) y papeles
+    del cliente sin codigo por cliente. Un mapeo que no cuadra NO se acepta.
+    """
+    from motor_reteica.ingesta.deteccion import detectar
+    from motor_reteica.ingesta.cuadres import validar_deteccion, es_confiable
+
+    try:
+        libro = openpyxl.load_workbook(ruta, read_only=True)
+        hojas = list(libro.sheetnames)
+        libro.close()
+    except Exception:
+        hojas = [None]
+
+    for hoja in hojas:
+        try:
+            filas = leer_filas(ruta, hoja=hoja)
+        except Exception:
+            continue
+        d = detectar(filas, tipo_esperado="auxiliar")
+        tiene_retencion = "credito" in d.columnas or "importe" in d.columnas
+        if "cuenta" in d.columnas and tiene_retencion and \
+                es_confiable(validar_deteccion(filas, d)):
+            return "auxiliar", hoja
+    return None, None
+
+
 def _rol_xlsx(ruta: Path):
     try:
         filas = leer_filas(ruta)
@@ -448,6 +479,12 @@ def _rol_xlsx(ruta: Path):
     tipo = detectar_tipo_documento(filas)
     if tipo:
         return tipo
+
+    # Fallback dinamico: reconocer por contenido, escaneando hojas.
+    rol, _ = _rol_por_contenido(ruta)
+    if rol:
+        return rol
+
     try:
         libro = openpyxl.load_workbook(ruta, read_only=True)
         periodos = [normalizar_periodo(n) for n in libro.sheetnames]

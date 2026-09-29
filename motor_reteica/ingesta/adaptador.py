@@ -52,8 +52,23 @@ def _digitos(valor) -> str:
     return re.sub(r"\D", "", str(valor)) if valor is not None else ""
 
 
+def _es_codigo_cuenta(cuenta) -> bool:
+    """La celda es un CODIGO de cuenta ICA real, no un subtotal de texto.
+
+    '2368010005' o 2368010005 -> True. 'Cuenta 2368010005 - Retencion...' (fila
+    de subtotal) -> False, porque trae letras: no es un codigo, es un rotulo.
+    Asi se descartan los subtotales que algunos exports intercalan.
+    """
+    if cuenta is None or cuenta == "":
+        return False
+    if isinstance(cuenta, (int, float)):
+        return str(int(cuenta)).startswith(_PUC_RETEICA)
+    nucleo = re.sub(r"[.\-\s]", "", str(cuenta).strip())
+    return nucleo.isdigit() and nucleo.startswith(_PUC_RETEICA)
+
+
 def _es_cuenta_reteica(cuenta: str) -> bool:
-    return _digitos(cuenta).startswith(_PUC_RETEICA)
+    return _es_codigo_cuenta(cuenta)
 
 
 # --------------------------------------------------------------------------
@@ -131,16 +146,48 @@ def tarifas_por_cuenta(filas, d: Deteccion) -> dict:
 # Filtro de filas
 # --------------------------------------------------------------------------
 
-def _es_transaccion(fila, d: Deteccion) -> bool:
-    """Fila de detalle real, respetando el filtro de jerarquia si lo hay."""
+def _transacciones(filas, d: Deteccion):
+    """Genera (fila, cuenta_efectiva) por cada transaccion real de retencion.
+
+    Resuelve dos rarezas comunes de los exports contables:
+      - FILAS DE SUBTOTAL intercaladas ('Cuenta 2368010005 - ...'): se saltan,
+        para no doblar los importes que ya estan en el detalle.
+      - CUENTA QUE NO SE REPITE: muchos exports ponen la cuenta solo en la
+        primera fila de cada bloque y dejan las siguientes en blanco (mismo
+        tercero, otra factura). Se ARRASTRA la ultima cuenta valida hacia esas
+        filas de continuacion. La bateria de cuadres valida que el arrastre no
+        haya inventado nada: si el total no cuadra con el del propio archivo,
+        el mapeo se rechaza.
+
+    Respeta el filtro de jerarquia (SAP B1: Serie='AstCont') cuando existe.
+    """
     col_cuenta = d.columnas.get("cuenta")
-    if col_cuenta is None or col_cuenta >= len(fila):
-        return False
-    if d.filtro_transaccion is not None:
-        col, marca = d.filtro_transaccion
-        if col >= len(fila) or _texto(fila[col]) != marca:
-            return False
-    return _es_cuenta_reteica(fila[col_cuenta])
+    if col_cuenta is None:
+        return
+    filtro = d.filtro_transaccion
+    ultima_cuenta = None
+    for fila in filas[d.fila_encabezado + 1:]:
+        celda = fila[col_cuenta] if col_cuenta < len(fila) else None
+
+        # Fila con codigo de cuenta ICA: fija la cuenta del bloque.
+        if _es_codigo_cuenta(celda):
+            ultima_cuenta = _digitos(celda)
+        elif celda not in (None, ""):
+            # Celda con texto que NO es codigo (subtotal, rotulo): corta el
+            # arrastre y se salta. Evita atribuir el subtotal a la cuenta previa.
+            ultima_cuenta = None
+            continue
+        # celda vacia -> se conserva ultima_cuenta (fila de continuacion)
+
+        if ultima_cuenta is None:
+            continue
+        if filtro is not None:
+            col, marca = filtro
+            if col >= len(fila) or _texto(fila[col]) != marca:
+                continue
+        if _retencion_de(fila, d) is None:
+            continue
+        yield fila, ultima_cuenta
 
 
 # --------------------------------------------------------------------------
@@ -148,10 +195,13 @@ def _es_transaccion(fila, d: Deteccion) -> bool:
 # --------------------------------------------------------------------------
 
 def _retencion_de(fila, d: Deteccion):
-    """El importe de la retencion practicada, normalizado a positivo."""
-    if d.convencion_signo == "columnas_separadas":
-        col = d.columnas.get("credito")
-    else:
+    """El importe de la retencion practicada, normalizado a positivo.
+
+    La retencion es el HABER: credito si el formato lo trae (SAP B1, o un papel
+    con 'Retencion'), si no la columna unica con signo ('Importe en ML').
+    """
+    col = d.columnas.get("credito")
+    if col is None:
         col = d.columnas.get("importe")
     if col is None or col >= len(fila):
         return None
@@ -165,14 +215,10 @@ def leer_lineas(filas, d: Deteccion) -> list:
         return fila[i] if i is not None and i < len(fila) else None
 
     lineas = []
-    for fila in filas[d.fila_encabezado + 1:]:
-        if not _es_transaccion(fila, d):
-            continue
+    for fila, cuenta_efectiva in _transacciones(filas, d):
         retencion = _retencion_de(fila, d)
-        if retencion is None:
-            continue
         lineas.append(LineaAuxiliar(
-            cuenta=_digitos(celda(fila, "cuenta")),
+            cuenta=cuenta_efectiva,
             nit=_texto(celda(fila, "nit")),
             tercero=_texto(celda(fila, "nombre")),
             fecha_documento=_a_fecha(celda(fila, "fecha_documento")),
@@ -194,15 +240,11 @@ def leer_saldos(filas, d: Deteccion, excluidas=()) -> dict:
     igual criterio que el balance de SAP GRC ('Saldo Haber per.inf.'). Excluye
     las cuentas que el auditor haya marcado como contrapartida.
     """
-    col_cuenta = d.columnas.get("cuenta")
-    if col_cuenta is None:
+    if d.columnas.get("cuenta") is None:
         return {}
     excluidas = set(excluidas)
     saldos = {}
-    for fila in filas[d.fila_encabezado + 1:]:
-        if not _es_transaccion(fila, d):
-            continue
-        cuenta = _digitos(fila[col_cuenta])
+    for fila, cuenta in _transacciones(filas, d):
         if cuenta in excluidas:
             continue
         valor = _retencion_de(fila, d)

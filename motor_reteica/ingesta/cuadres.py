@@ -44,67 +44,89 @@ def _digitos(valor) -> str:
     return re.sub(r"\D", "", str(valor)) if valor is not None else ""
 
 
-def _es_fila_detalle(fila, d: Deteccion) -> bool:
-    """Una transaccion real, no una fila de subtotal/padre/jerarquia."""
-    col_cuenta = d.columnas.get("cuenta")
-    if col_cuenta is None or col_cuenta >= len(fila):
-        return False
-
-    # Con jerarquia (SAP B1): la marca de Serie decide. Es lo mas fiable.
-    if d.filtro_transaccion is not None:
-        col, marca = d.filtro_transaccion
-        return col < len(fila) and str(fila[col]).strip() == marca
-
-    # Sin jerarquia: la cuenta tiene que ser una sub-cuenta ICA de detalle
-    # (cuelga de 2368 y trae sufijo), no la fila padre "2368"/"23680503" ni un
-    # subtotal de texto ("Cuenta 2368010005 - ...", "* Subtotal 2 236801").
-    celda = fila[col_cuenta]
-    if isinstance(celda, str) and not celda.strip().replace("-", "").isdigit():
-        return False
-    dig = _digitos(celda)
-    return dig.startswith(_PUC_RETEICA) and len(dig) >= len(_PUC_RETEICA) + 4
-
-
 def _columna_retencion(d: Deteccion) -> str | None:
-    """El rol que carga la retencion practicada segun la convencion de signo."""
-    if d.convencion_signo == "columnas_separadas":
-        return "credito" if "credito" in d.columnas else None
-    return "importe" if "importe" in d.columnas else None
+    """El rol que carga la retencion practicada.
+
+    La retencion es el HABER: si el formato trae una columna de credito/haber
+    (SAP B1 'Credito Moneda Local', SAP GRC 'Saldo Haber per.inf.', o un papel
+    con 'Retencion'), esa es. Si solo hay una columna con signo ('Importe en
+    ML'), esa. El orden importa: credito primero, importe como respaldo.
+    """
+    if "credito" in d.columnas:
+        return "credito"
+    if "importe" in d.columnas:
+        return "importe"
+    return None
 
 
-def _suma_detalle(filas, d: Deteccion, rol: str) -> Decimal:
-    col = d.columnas.get(rol)
-    if col is None:
-        return Decimal("0")
+def _suma_detalle(filas, d: Deteccion) -> Decimal:
+    """Suma de la retencion de las transacciones reales (misma logica que el
+    adaptador: arrastra la cuenta, excluye subtotales, respeta la jerarquia)."""
+    from motor_reteica.ingesta.adaptador import _transacciones, _retencion_de
     total = Decimal("0")
-    for fila in filas[d.fila_encabezado + 1:]:
-        if not _es_fila_detalle(fila, d):
-            continue
-        if col < len(fila):
-            v = _a_decimal(fila[col])
-            if v is not None:
-                total += v.copy_abs()
+    for fila, _ in _transacciones(filas, d):
+        v = _retencion_de(fila, d)
+        if v is not None:
+            total += v.copy_abs()
     return total
 
 
-def _totalizador_del_archivo(filas, d: Deteccion, rol: str):
-    """Busca la fila de total que el propio export trae y lee su columna `rol`.
+def _totalizador_del_archivo(filas, d: Deteccion):
+    """El total que el propio archivo trae, para contrastar con el detalle.
 
-    Estrategia: entre las filas que NO son detalle, la que trae el mayor valor
-    absoluto en la columna del rol es el totalizador (la fila padre "23680503"
-    en SBO, o "* Subtotal" en SAP GRC). Devuelve None si no hay ninguna.
+    Entre las filas que NO son transaccion pero traen un valor de retencion:
+      - si hay filas de SUBTOTAL por cuenta ('Cuenta 2368010005 - ...'), el
+        total es la SUMA de esos subtotales (el gran total del archivo);
+      - si no, es el mayor valor suelto (fila padre '23680503' en SBO, o
+        '* Subtotal' en SAP GRC).
+    Devuelve None si el archivo no trae ningun total.
     """
+    from motor_reteica.ingesta.adaptador import _transacciones, _retencion_de
+    from motor_reteica.ingesta.adaptador import _es_codigo_cuenta
+
+    col_cuenta = d.columnas.get("cuenta")
+    ids_transaccion = {id(f) for f, _ in _transacciones(filas, d)}
+    subtotales, sueltos = [], []
+    for fila in filas[d.fila_encabezado + 1:]:
+        if id(fila) in ids_transaccion:
+            continue
+        v = _retencion_de(fila, d)
+        if v is None or v == 0:
+            continue
+        celda = fila[col_cuenta] if (col_cuenta is not None
+                                     and col_cuenta < len(fila)) else None
+        # Fila de subtotal por cuenta: texto con los digitos 2368 pero que no es
+        # un codigo puro ('Cuenta 2368010005 - Retencion...').
+        if (isinstance(celda, str) and _digitos(celda).startswith(_PUC_RETEICA)
+                and not _es_codigo_cuenta(celda)):
+            subtotales.append(v.copy_abs())
+        else:
+            sueltos.append(v.copy_abs())
+    if subtotales:
+        return sum(subtotales, Decimal("0"))
+    return max(sueltos) if sueltos else None
+
+
+def _total_columna(filas, d: Deteccion, rol: str):
+    """El mayor total suelto de UNA columna (para partida doble).
+
+    Mira las filas que no son transaccion y devuelve el mayor valor absoluto de
+    la columna `rol` (la fila padre en SBO trae ahi el total de debito y de
+    credito). None si esa columna no existe o no hay total.
+    """
+    from motor_reteica.ingesta.adaptador import _transacciones
     col = d.columnas.get(rol)
     if col is None:
         return None
-    candidatos = []
+    ids_transaccion = {id(f) for f, _ in _transacciones(filas, d)}
+    valores = []
     for fila in filas[d.fila_encabezado + 1:]:
-        if _es_fila_detalle(fila, d) or col >= len(fila):
+        if id(fila) in ids_transaccion or col >= len(fila):
             continue
         v = _a_decimal(fila[col])
         if v is not None and v != 0:
-            candidatos.append(v.copy_abs())
-    return max(candidatos) if candidatos else None
+            valores.append(v.copy_abs())
+    return max(valores) if valores else None
 
 
 # --------------------------------------------------------------------------
@@ -122,8 +144,8 @@ def cuadre_totalizador(filas, d: Deteccion) -> Cuadre:
     if rol is None:
         return Cuadre("totalizador", False, None, None, "credito",
                       "no se identifico una columna de retencion")
-    detalle_suma = _suma_detalle(filas, d, rol)
-    total = _totalizador_del_archivo(filas, d, rol)
+    detalle_suma = _suma_detalle(filas, d)
+    total = _totalizador_del_archivo(filas, d)
     if total is None:
         return Cuadre("totalizador", True, None, detalle_suma, rol,
                       "el archivo no trae fila de totales; cuadre omitido")
@@ -143,8 +165,8 @@ def cuadre_partida_doble(filas, d: Deteccion) -> Cuadre:
     if d.convencion_signo != "columnas_separadas":
         return Cuadre("partida_doble", True, None, None, "",
                       "convencion de columna unica; no aplica")
-    tot_debito = _totalizador_del_archivo(filas, d, "debito")
-    tot_credito = _totalizador_del_archivo(filas, d, "credito")
+    tot_debito = _total_columna(filas, d, "debito")
+    tot_credito = _total_columna(filas, d, "credito")
     if tot_debito is None or tot_credito is None:
         return Cuadre("partida_doble", True, tot_credito, tot_debito, "",
                       "sin totalizador en ambas columnas; cuadre omitido")
@@ -161,18 +183,9 @@ def movimiento_periodo_balance(filas, d: Deteccion) -> Decimal:
     retencion (credito/importe) de las filas de cuentas ICA de detalle. No usa
     totalizador del archivo: el balance abarca toda la empresa, no solo 2368.
     """
-    rol = _columna_retencion(d)
-    if rol is None:
+    if _columna_retencion(d) is None:
         return Decimal("0")
-    col = d.columnas[rol]
-    total = Decimal("0")
-    for fila in filas[d.fila_encabezado + 1:]:
-        if not _es_fila_detalle(fila, d) or col >= len(fila):
-            continue
-        v = _a_decimal(fila[col])
-        if v is not None:
-            total += v.copy_abs()
-    return total
+    return _suma_detalle(filas, d)
 
 
 def cuadre_auxiliar_vs_balance(total_auxiliar: Decimal,
