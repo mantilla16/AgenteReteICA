@@ -1,0 +1,38 @@
+name: CI
+
+# Corre la suite de pruebas del motor en cada push a main y en cada Pull
+# Request. Es la red de seguridad: si un cambio rompe alguno de los ~500 tests,
+# GitHub lo marca en rojo antes de que llegue a produccion.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:        # permite lanzarlo a mano desde la pestana Actions
+
+jobs:
+  pruebas:
+    # Corre en TU runner self-hosted (el que tienes en el servidor). Si el
+    # runner esta apagado o no registrado en este repo, el job queda en cola
+    # hasta que vuelva. Para correr en la nube de GitHub, cambiar esta linea
+    # por:  runs-on: ubuntu-latest
+    runs-on: self-hosted
+
+    steps:
+      - name: Traer el codigo
+        uses: actions/checkout@v4
+
+      - name: Preparar Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Correr las pruebas
+        run: pytest -q

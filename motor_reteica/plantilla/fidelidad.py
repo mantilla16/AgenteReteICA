@@ -52,16 +52,24 @@ _PARTES_CON_VALORES = re.compile(
 _DESCARTAR = "xl/calcChain.xml"
 
 
-_RE_SHEET = re.compile(
-    r'<sheet\b[^/>]*\bname="([^"]+)"[^/>]*\bsheetId="[^"]+"[^/>]*/?>')
+# La etiqueta <sheet ...> COMPLETA. Antes el patron usaba [^/>]* para saltar
+# atributos, pero openpyxl escribe xmlns:r="http://..." dentro de <sheet>, y las
+# barras de esa URL cortaban el [^/>]*: el patron no matcheaba, _visibilidades
+# devolvia vacio y la hoja oculta salia visible. Ahora se captura la etiqueta
+# entera (solo se corta en '>') y el nombre/estado se extraen de ella aparte.
+_RE_SHEET = re.compile(r'<sheet\b[^>]*?/?>')
 
 
 def _visibilidades(xml: str) -> dict:
     """Devuelve {nombre_de_hoja: 'visible'|'hidden'|'veryHidden'}."""
     salida = {}
     for m in _RE_SHEET.finditer(xml):
-        estado_m = re.search(r'state="([^"]+)"', m.group(0))
-        salida[m.group(1)] = estado_m.group(1) if estado_m else "visible"
+        etiqueta = m.group(0)
+        nombre_m = re.search(r'\bname="([^"]+)"', etiqueta)
+        if not nombre_m:
+            continue
+        estado_m = re.search(r'\bstate="([^"]+)"', etiqueta)
+        salida[nombre_m.group(1)] = estado_m.group(1) if estado_m else "visible"
     return salida
 
 
@@ -87,8 +95,10 @@ def _propagar_visibilidad(xml_original: str, xml_escrito: str) -> str:
 
 def _remendar_state(xml: str, nombre: str, estado: str) -> str:
     """Injerta o reemplaza el atributo state en la etiqueta <sheet> del nombre."""
+    # Igual que en _RE_SHEET: se corta solo en '>', no en '/', porque el
+    # xmlns:r="http://..." que openpyxl mete en <sheet> trae barras.
     patron = re.compile(
-        r'(<sheet\b[^/>]*\bname="%s"[^/>]*?)(/?>)' % re.escape(nombre))
+        r'(<sheet\b[^>]*?\bname="%s"[^>]*?)(/?>)' % re.escape(nombre))
     def _reemplazar(m):
         etiqueta, cierre = m.group(1), m.group(2)
         etiqueta = re.sub(r'\s+state="[^"]+"', "", etiqueta)
