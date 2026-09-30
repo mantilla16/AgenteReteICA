@@ -32,6 +32,12 @@ class Cuadre:
     obtenido: Decimal | None
     rol_implicado: str          # que rol revisar si NO cuadra (para el wizard)
     detalle: str
+    # Un cuadre BLOQUEANTE que falla invalida el mapeo (se rechaza). Uno no
+    # bloqueante es corroboracion: aporta cuando cuadra, pero su fallo no
+    # descalifica el mapeo. partida_doble es no bloqueante: solo se cumple en un
+    # auxiliar de cierre de mes (Db==Cr), NO en un balance (Db!=Cr es normal),
+    # asi que su fallo no puede rechazar un balance bien mapeado.
+    bloqueante: bool = True
 
     @property
     def diferencia(self):
@@ -164,16 +170,18 @@ def cuadre_partida_doble(filas, d: Deteccion) -> Cuadre:
     """
     if d.convencion_signo != "columnas_separadas":
         return Cuadre("partida_doble", True, None, None, "",
-                      "convencion de columna unica; no aplica")
+                      "convencion de columna unica; no aplica",
+                      bloqueante=False)
     tot_debito = _total_columna(filas, d, "debito")
     tot_credito = _total_columna(filas, d, "credito")
     if tot_debito is None or tot_credito is None:
         return Cuadre("partida_doble", True, tot_credito, tot_debito, "",
-                      "sin totalizador en ambas columnas; cuadre omitido")
+                      "sin totalizador en ambas columnas; cuadre omitido",
+                      bloqueante=False)
     cuadra = (tot_debito - tot_credito).copy_abs() <= _TOLERANCIA
     return Cuadre("partida_doble", cuadra, tot_credito, tot_debito, "credito",
                   "debito (%s) vs credito (%s) de la fila padre"
-                  % (tot_debito, tot_credito))
+                  % (tot_debito, tot_credito), bloqueante=False)
 
 
 def movimiento_periodo_balance(filas, d: Deteccion) -> Decimal:
@@ -226,4 +234,6 @@ def validar_deteccion(filas, d: Deteccion) -> list:
 
 
 def es_confiable(cuadres: list) -> bool:
-    return all(c.cuadra for c in cuadres)
+    """El mapeo es de fiar si TODOS los cuadres BLOQUEANTES cuadran. Los no
+    bloqueantes (partida doble) corroboran pero su fallo no descalifica."""
+    return all(c.cuadra for c in cuadres if c.bloqueante)

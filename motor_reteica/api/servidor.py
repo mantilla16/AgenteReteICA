@@ -467,8 +467,23 @@ def _rol_por_contenido(ruta: Path):
         tiene_retencion = "credito" in d.columnas or "importe" in d.columnas
         if "cuenta" in d.columnas and tiene_retencion and \
                 es_confiable(validar_deteccion(filas, d)):
-            return "auxiliar", hoja
+            return _rol_por_nombre(ruta), hoja
     return None, None
+
+
+def _rol_por_nombre(ruta: Path) -> str:
+    """Auxiliar o balance cuando el contenido no los distingue.
+
+    En SAP Business One el auxiliar y el balance son el MISMO layout (mismas
+    columnas, ambos con saldo inicial/final y ambos cuadran el totalizador), asi
+    que no hay senal de contenido que los separe. Se usa el nombre del archivo
+    -- que es como el propio auditor los distingue ('Balance agosto.xlsx' vs
+    'aux2368...'). Por defecto auxiliar, que es el insumo obligatorio.
+    """
+    nombre = ruta.name.lower()
+    if "balance" in nombre or "saldos" in nombre or "bce" in nombre:
+        return "balance"
+    return "auxiliar"
 
 
 def _rol_xlsx(ruta: Path):
