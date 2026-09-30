@@ -118,18 +118,23 @@ def _fecha(valor) -> str:
 
 
 _COLUMNAS_AUX_FISCAL = (
-    # (etiquetas aceptadas, columna destino 1-based)
+    # (etiquetas aceptadas, columna destino 1-based). Los alias cubren las
+    # variantes de SAP: FBL3N abrevia ('Fecha doc.', 'Fe.contab.', 'Cla',
+    # 'Nº doc.'); otras transacciones/exports escriben el nombre completo
+    # ('Fecha de documento', 'Fecha contabiliz.', 'Clase de documento',
+    # 'Nº documento') -- es el auxiliar de ZFT.
     (("Cuenta",),                                       2),   # B
     (("Texto breve", "Texto"),                          3),   # C
     (("Asignación", "Asignacion"),                      4),   # D
     (("Tercero",),                                      5),   # E
-    (("Fecha doc.",),                                   6),   # F
-    (("Fe.contab.",),                                   7),   # G
+    (("Fecha doc.", "Fecha de documento"),              6),   # F
+    (("Fe.contab.", "Fecha contabiliz.", "Fecha contabilización",
+      "Fecha contabilizacion"),                         7),   # G
     (("Referencia",),                                   8),   # H
     (("Importe en ML", "Importe en moneda local"),      9),   # I
     (("Período", "Periodo"),                           10),   # J
-    (("Cla",),                                         11),   # K
-    (("Nº doc.", "N° doc."),                           12),   # L
+    (("Cla", "Clase de documento"),                    11),   # K
+    (("Nº doc.", "N° doc.", "Nº documento", "N° documento"), 12),  # L
     (("Texto largo", "Texto de cabecera de documento"), 13),  # M  (opcional)
     (("Importe valorado ML2",),                        14),   # N
     (("Soc.", "Sociedad"),                             15),   # O
@@ -680,7 +685,10 @@ def _depositar_declaracion(libro, ctx) -> None:
 
     fila = inicio
     for actividad in ctx.borrador.actividades:
-        hoja.cell(row=fila, column=9, value=int(actividad.codigo))
+        # El codigo CIIU es un IDENTIFICADOR, no un numero: como int, Excel lo
+        # formatea con separador de miles ('5.611'). Se escribe como texto para
+        # que salga '5611'.
+        hoja.cell(row=fila, column=9, value=str(actividad.codigo))
         hoja.cell(row=fila, column=10, value=float(actividad.tarifa))
         hoja.cell(row=fila, column=11, value=int(actividad.base))
         hoja.cell(row=fila, column=12, value=int(actividad.impuesto))

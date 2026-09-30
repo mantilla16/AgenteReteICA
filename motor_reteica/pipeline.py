@@ -347,6 +347,14 @@ def revisar(carpeta, nit, periodo, municipio,
     borrador = _borrador_o_esqueleto(rutas["borrador"], nit, periodo,
                                      municipio.nombre)
     lineas = leer_auxiliar(rutas["auxiliar"])
+    # La contrapartida de pago (p.ej. 2368010090 'Ret. Ffe ICA a pagar') NO es
+    # una retencion practicada: es el traslado a la cuenta por pagar. Si el
+    # auxiliar la trae como una linea mas (ZFT), infla el total y descuadra el
+    # cruce contra lo declarado. Se excluye con el mismo criterio que el balance:
+    # lo que el auditor atesto como excluido o lo que el motor detecto como
+    # contrapartida por la naturaleza del saldo.
+    if excluidas_efectivas:
+        lineas = [l for l in lineas if l.cuenta not in excluidas_efectivas]
     saldos = (leer_balance(rutas["balance"], excluidas_efectivas)
               if "balance" in presentes else None)
     filas_erp = leer_sap_retenciones(rutas["erp"]) if "erp" in presentes else None

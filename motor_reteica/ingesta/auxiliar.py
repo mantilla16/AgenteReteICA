@@ -70,6 +70,15 @@ def leer_auxiliar(ruta: Path) -> list:
     if _tiene_firma(filas, FIRMA_AUXILIAR):
         return _leer_rico(filas)
 
+    # Formato con CUENTA POR LINEA pero etiquetas distintas a FBL3N (ZFT trae
+    # 'Importe en moneda local' y la cuenta por linea, no en subtotales). Lo
+    # lee el detector dinamico, que mapea por contenido. Se prefiere sobre el
+    # agregado: el agregado solo sirve cuando la cuenta NO viene por linea (sale
+    # en filas de subtotal), y aplicado a un archivo con cuenta por linea leia 0
+    # lineas porque no encontraba subtotales.
+    if _cuenta_por_linea(filas):
+        return _leer_dinamico(filas)
+
     # Cualquier firma alternativa del auxiliar habilita el modo agregado.
     for firma in FIRMAS_ALTERNATIVAS["auxiliar"][1:]:
         if _tiene_firma(filas, firma):
@@ -80,6 +89,26 @@ def leer_auxiliar(ruta: Path) -> list:
     # valida con la bateria de cuadres antes de confiar en el; si no cuadra,
     # se lanza ColumnaNoIdentificada para que el pipeline lo muestre.
     return _leer_dinamico(filas)
+
+
+def _cuenta_por_linea(filas) -> bool:
+    """True si el archivo trae la cuenta ICA como columna POR LINEA (formato
+    rico con etiquetas distintas), no solo en filas de subtotal (agregado).
+
+    Distingue el auxiliar de ZFT (cuenta 2368... en cada fila) del agregado de
+    Agroingenium (cuenta solo en subtotales de texto 'Cuenta 2368...'), para no
+    cambiar el enrutamiento de este ultimo.
+    """
+    from motor_reteica.ingesta.deteccion import detectar
+    from motor_reteica.ingesta.adaptador import _es_codigo_cuenta
+    d = detectar(filas, tipo_esperado="auxiliar")
+    col = d.columnas.get("cuenta")
+    if col is None:
+        return False
+    con_codigo = sum(
+        1 for fila in filas[d.fila_encabezado + 1:]
+        if col < len(fila) and _es_codigo_cuenta(fila[col]))
+    return con_codigo >= 2
 
 
 def _leer_dinamico(filas: list) -> list:

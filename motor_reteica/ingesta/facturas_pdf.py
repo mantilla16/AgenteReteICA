@@ -20,8 +20,9 @@ REQUIERE_REVISION = "REQUIERE_REVISION"
 _RE_NIT = re.compile(r"(?:NIT|Nit)[\s:.]*([\d][\d.\s]{7,14}\d)")
 _RE_ACTIVIDAD = re.compile(r"Actividad\s+Econ[oó]mica\s+(\d{4})", re.IGNORECASE)
 _RE_FECHA_DMY = re.compile(r"\b(\d{2})/(\d{2})/(20\d{2})\b")
-_RE_FECHA_YMD = re.compile(r"\b(20\d{2})-(\d{2})-(\d{2})\b")
-_ETIQUETAS_BASE = ("Total Bruto", "Subtotal", "SUBTOTAL", "Base gravable")
+_RE_FECHA_YMD = re.compile(r"\b(20\d{2})[-/](\d{2})[-/](\d{2})\b")
+_ETIQUETAS_BASE = ("Total Bruto", "Subtotal", "SUBTOTAL", "Sub Total",
+                   "Base gravable")
 
 
 @dataclass(frozen=True)
@@ -47,7 +48,14 @@ def _a_decimal(bruto: str):
         else:
             limpio = limpio.replace(",", "")
     elif "," in limpio:
-        limpio = limpio.replace(",", "")
+        # Coma sola: decimal si trae 1-2 digitos detras ('12,50'), miles si no.
+        entero, _, dec = limpio.rpartition(",")
+        limpio = (entero + "." + dec) if len(dec) in (1, 2) else limpio.replace(",", "")
+    elif "." in limpio:
+        # Punto solo: en las facturas colombianas es separador de MILES (los
+        # decimales van con coma). '2.446.759' fallaba en Decimal por traer
+        # varios puntos y la base salia vacia. Se quitan.
+        limpio = limpio.replace(".", "")
     try:
         return Decimal(limpio).quantize(Decimal("1"))
     except Exception:
@@ -84,6 +92,21 @@ def _fecha_de_emision(texto: str, lineas: list):
     return _primera_fecha(texto)
 
 
+_RE_DOC_SOPORTE = re.compile(r"Documento\s+Soporte\s+([A-Z]{1,4}\d{2,})",
+                             re.IGNORECASE)
+
+
+def _numero_de_documento(texto: str):
+    """El numero interno del comprobante (p.ej. 'DE252' de un documento soporte).
+
+    Es la referencia con la que aparece en el auxiliar cuando el archivo se
+    guardo con otro nombre. None si el formato no lo expone claramente; ahi el
+    llamador cae al nombre del archivo.
+    """
+    m = _RE_DOC_SOPORTE.search(texto)
+    return m.group(1).upper() if m else None
+
+
 def leer_factura(ruta: Path, nit_cliente: str = "819002433") -> FacturaFuente:
     with pdfplumber.open(ruta) as pdf:
         texto = pdf.pages[0].extract_text()
@@ -115,9 +138,16 @@ def leer_factura(ruta: Path, nit_cliente: str = "819002433") -> FacturaFuente:
 
     actividad = _RE_ACTIVIDAD.search(texto)
 
+    # Numero de referencia para cruzar contra el auxiliar. El nombre del archivo
+    # suele bastar (trae 'FVLR1057'), pero un documento soporte se guarda con el
+    # nombre del proveedor ('JUIIO OROZCO DELGADO') y su referencia en el
+    # auxiliar es el numero interno 'DE252', que solo esta en el CONTENIDO. Se
+    # prefiere ese numero cuando aparece; si no, el nombre del archivo.
+    numero = _numero_de_documento(texto) or Path(ruta).stem
+
     confianza = ALTA if (nit and base is not None) else REQUIERE_REVISION
     return FacturaFuente(
-        numero=Path(ruta).stem,
+        numero=numero,
         nit=nit,
         base=base,
         fecha=fecha,
