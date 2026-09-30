@@ -233,22 +233,80 @@ def leer_lineas(filas, d: Deteccion) -> list:
     return lineas
 
 
-def leer_saldos(filas, d: Deteccion, excluidas=()) -> dict:
+def _normalizar(texto: str) -> str:
+    s = str(texto or "").upper()
+    for a, b in (("Á", "A"), ("É", "E"), ("Í", "I"), ("Ó", "O"), ("Ú", "U"),
+                 ("Ñ", "N")):
+        s = s.replace(a, b)
+    return s
+
+
+def _menciona_municipio(nombre_cuenta: str, municipio: str) -> bool:
+    """El nombre de la cuenta nombra al municipio (aunque venga abreviado).
+
+    En un balance con varios municipios, las cuentas ICA traen el municipio en
+    el nombre ('...RETENIDO SANTA M. 5x1000'). Se busca la primera palabra
+    significativa del municipio (>=4 letras: 'SANTA', 'GALAPA', 'CARTAGENA').
+    """
+    nombre = _normalizar(nombre_cuenta)
+    palabras = [p for p in _normalizar(municipio).split() if len(p) >= 4]
+    return any(p in nombre for p in palabras) if palabras else False
+
+
+def leer_saldos(filas, d: Deteccion, excluidas=(), municipio: str = None) -> dict:
     """Movimiento del periodo por cuenta 2368, desde cualquier balance.
 
-    Usa la columna de retencion (credito/importe) como movimiento del periodo,
-    igual criterio que el balance de SAP GRC ('Saldo Haber per.inf.'). Excluye
-    las cuentas que el auditor haya marcado como contrapartida.
+    Maneja el balance COMPLETO de la empresa (miles de cuentas, con jerarquia y
+    varios municipios), no solo un extracto de 2368:
+
+      - JERARQUIA: la cuenta 2368 tiene padres que son SUBTOTALES (2368, 236805,
+        23680503) y hojas de detalle (2368050301...). Se toman solo las HOJAS
+        (una cuenta que no es prefijo de otra), para no doblar el movimiento.
+      - FILA RESUMEN: cada cuenta trae una fila de total (sin tercero, NIT vacio)
+        y filas por tercero. El movimiento de la cuenta es el de la fila resumen;
+        sumar las de tercero volveria a doblar.
+      - MUNICIPIO: si el balance trae cuentas de varios municipios, se queda con
+        las del municipio en revision (por el nombre de la cuenta). Si ninguna
+        nombra municipio (formato SAP GRC, 'Impuest ICA Reten 7%'), no filtra.
     """
-    if d.columnas.get("cuenta") is None:
+    col_cuenta = d.columnas.get("cuenta")
+    if col_cuenta is None:
         return {}
+    col_nombre = d.columnas.get("nombre_cuenta")
+    col_nit = d.columnas.get("nit")
     excluidas = set(excluidas)
-    saldos = {}
-    for fila, cuenta in _transacciones(filas, d):
-        if cuenta in excluidas:
+
+    # 1. Fila RESUMEN de cada cuenta 2368 (sin tercero): {cuenta: (nombre, valor)}
+    resumen = {}
+    for fila in filas[d.fila_encabezado + 1:]:
+        if col_cuenta >= len(fila) or not _es_codigo_cuenta(fila[col_cuenta]):
+            continue
+        # Fila de tercero (trae NIT/codigo SN): es el desglose, no el total.
+        if col_nit is not None and col_nit < len(fila) and \
+                _texto(fila[col_nit]):
+            continue
+        cuenta = _digitos(fila[col_cuenta])
+        if cuenta in resumen:
             continue
         valor = _retencion_de(fila, d)
-        if valor is None:
-            continue
-        saldos[cuenta] = saldos.get(cuenta, Decimal("0")) + valor.copy_abs()
-    return saldos
+        nombre = (_texto(fila[col_nombre])
+                  if col_nombre is not None and col_nombre < len(fila) else "")
+        resumen[cuenta] = (nombre, valor.copy_abs() if valor is not None
+                           else Decimal("0"))
+
+    if not resumen:
+        return {}
+
+    # 2. Solo HOJAS: una cuenta que no es prefijo de ninguna otra recogida.
+    codigos = set(resumen)
+    hojas = {c for c in codigos
+             if not any(o != c and o.startswith(c) for o in codigos)}
+
+    # 3. Filtro por municipio, solo si el balance mezcla municipios.
+    if municipio:
+        del_municipio = {c for c in hojas
+                         if _menciona_municipio(resumen[c][0], municipio)}
+        if del_municipio and len(del_municipio) < len(hojas):
+            hojas = del_municipio
+
+    return {c: resumen[c][1] for c in hojas if c not in excluidas}

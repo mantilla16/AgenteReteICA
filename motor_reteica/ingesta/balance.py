@@ -105,7 +105,7 @@ def _deteccion_dinamica(filas):
     return d if ("cuenta" in d.columnas and tiene_mov) else None
 
 
-def leer_balance(ruta: Path, excluidas=()) -> dict:
+def leer_balance(ruta: Path, excluidas=(), municipio: str = None) -> dict:
     filas = leer_filas(ruta, hoja="BALANCE")
     try:
         inicio, col = localizar_columnas(filas, ROLES_BALANCE, FIRMA_BALANCE)
@@ -114,7 +114,7 @@ def leer_balance(ruta: Path, excluidas=()) -> dict:
         if d is None:
             raise
         from motor_reteica.ingesta.adaptador import leer_saldos
-        return leer_saldos(filas, d, excluidas)
+        return leer_saldos(filas, d, excluidas, municipio=municipio)
 
     saldos = {}
     for fila in filas[inicio + 1:]:

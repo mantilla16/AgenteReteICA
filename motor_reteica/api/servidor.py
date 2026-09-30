@@ -450,16 +450,29 @@ def _rol_por_contenido(ruta: Path):
     except Exception:
         hojas = [None]
 
+    from motor_reteica.ingesta.adaptador import _es_codigo_cuenta
+    rol = _rol_por_nombre(ruta)
     for hoja in hojas:
         try:
             filas = leer_filas(ruta, hoja=hoja)
         except Exception:
             continue
-        d = detectar(filas, tipo_esperado="auxiliar")
-        tiene_retencion = "credito" in d.columnas or "importe" in d.columnas
-        if "cuenta" in d.columnas and tiene_retencion and \
-                es_confiable(validar_deteccion(filas, d)):
-            return _rol_por_nombre(ruta), hoja
+        # Se valida CON EL ROL QUE SUGIERE EL NOMBRE: un balance no lleva el
+        # cuadre 'totalizador' del auxiliar (un balance COMPLETO trae miles de
+        # cuentas y no hay un total solo-2368 contra el cual cuadrar). Para
+        # balance basta que haya columna de cuenta, de movimiento y cuentas
+        # 2368; el cruce contra el auxiliar lo valida despues el pipeline.
+        d = detectar(filas, tipo_esperado=rol)
+        tiene_movimiento = "credito" in d.columnas or "importe" in d.columnas
+        col_cuenta = d.columnas.get("cuenta")
+        if col_cuenta is None or not tiene_movimiento:
+            continue
+        hay_2368 = any(
+            _es_codigo_cuenta(fila[col_cuenta])
+            for fila in filas[d.fila_encabezado + 1:]
+            if col_cuenta < len(fila))
+        if hay_2368 and es_confiable(validar_deteccion(filas, d)):
+            return rol, hoja
     return None, None
 
 

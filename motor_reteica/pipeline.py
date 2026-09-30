@@ -355,7 +355,8 @@ def revisar(carpeta, nit, periodo, municipio,
     # contrapartida por la naturaleza del saldo.
     if excluidas_efectivas:
         lineas = [l for l in lineas if l.cuenta not in excluidas_efectivas]
-    saldos = (leer_balance(rutas["balance"], excluidas_efectivas)
+    saldos = (leer_balance(rutas["balance"], excluidas_efectivas,
+                           municipio=municipio.nombre)
               if "balance" in presentes else None)
     filas_erp = leer_sap_retenciones(rutas["erp"]) if "erp" in presentes else None
 
