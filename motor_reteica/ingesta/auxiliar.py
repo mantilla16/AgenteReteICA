@@ -125,10 +125,17 @@ def _leer_dinamico(filas: list) -> list:
     from motor_reteica.parametros.columnas import ColumnaNoIdentificada
 
     d = detectar(filas, tipo_esperado="auxiliar")
-    if "cuenta" not in d.columnas or _columna_retencion_ausente(d):
+    if "cuenta" not in d.columnas:
         raise ColumnaNoIdentificada(
             "auxiliar",
-            "no se identifico la cuenta o el importe de retencion por contenido",
+            "no se identifico la columna de la CUENTA en el auxiliar",
+            d.etiquetas)
+    if _columna_retencion_ausente(d):
+        raise ColumnaNoIdentificada(
+            "auxiliar",
+            "el auxiliar no trae una columna de retencion identificable (Importe "
+            "en ML / Credito / Haber): sin ese campo no se puede validar el "
+            "ReteICA. Verifique que el auxiliar exportado incluya esa columna",
             d.etiquetas)
     cuadres = validar_deteccion(filas, d)
     if not es_confiable(cuadres):
