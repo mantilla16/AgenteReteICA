@@ -72,6 +72,9 @@ class ContextoRevision:
     # Saldo acumulado de cada cuenta 2368, SOLO para mostrarlo en el papel.
     # No entra en ningun cruce: arrastra los periodos anteriores.
     acumulados: dict = field(default_factory=dict)
+    # Movimiento DEBITO del periodo por cuenta 2368 (columna Debito de la cedula
+    # REVISION ICA). Vacio en SAP GRC; se llena en balances con debito separado.
+    debitos: dict = field(default_factory=dict)
     # Donde quedo cada documento que se uso. El papel de trabajo ES la
     # evidencia, asi que las hojas de insumo transcriben la fuente COMPLETA;
     # para eso hay que poder volver a leerla al depositar. Nada de esto entra
@@ -358,6 +361,10 @@ def revisar(carpeta, nit, periodo, municipio,
     saldos = (leer_balance(rutas["balance"], excluidas_efectivas,
                            municipio=municipio.nombre)
               if "balance" in presentes else None)
+    from motor_reteica.ingesta.balance import leer_debitos
+    debitos = (leer_debitos(rutas["balance"], excluidas_efectivas,
+                            municipio=municipio.nombre)
+               if "balance" in presentes else {})
     filas_erp = leer_sap_retenciones(rutas["erp"]) if "erp" in presentes else None
 
     # Tarifa por cuenta: el dict del municipio es autoritativo para las cuentas
@@ -474,5 +481,6 @@ def revisar(carpeta, nit, periodo, municipio,
         atestacion=atestacion,
         candidatas_sin_declarar=frozenset(candidatas_sin_declarar),
         acumulados=acumulados,
+        debitos=debitos,
         rutas=dict(rutas),
     )

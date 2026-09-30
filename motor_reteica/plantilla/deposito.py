@@ -549,8 +549,27 @@ def _pegar_fuente_completa(hoja, ruta, inicio: int, fin: int) -> None:
     # vacias en las primeras columnas.
     encabezado = _detectar_encabezado(filas)
 
-    if encabezado > 0:
-        _escribir_fila(hoja, inicio - 1, filas[encabezado])
+    # Ancho real de la fuente: se pega TAL CUAL con todas sus columnas (el
+    # auxiliar/balance de SAP B1 trae 21, con Debito/Credito/Saldo despues de la
+    # O), no solo hasta la O de la plantilla TERLICA.
+    ancho = min(max((len(f) for f in filas), default=15), 36)
+
+    # La fuente se pega TAL CUAL con su propio encabezado, asi que se limpia el
+    # banner de la plantilla (metadata de TERLICA: 'Cta.mayor/Sociedad/Ledger')
+    # por encima del area. Si no, la hoja rotularia datos de otra empresa con la
+    # cabecera de TERLICA.
+    for r in range(1, inicio - 1):
+        for c in range(1, ancho + 1):
+            celda = hoja.cell(row=r, column=c)
+            if _escribible(celda):
+                celda.value = None
+
+    # SIEMPRE se escribe el encabezado NATIVO de la fuente encima del area,
+    # reemplazando el de la plantilla. Antes solo se escribia si el encabezado
+    # venia despues de filas de banner (encabezado>0); cuando la fuente traia el
+    # encabezado en la primera fila (auxiliar de SAP B1), no se escribia y la
+    # hoja quedaba con el encabezado de TERLICA sobre datos de otro ERP.
+    _escribir_fila(hoja, inicio - 1, filas[encabezado], max_col=ancho)
 
     # Las filas totalmente vacias del origen se saltan: SAP y otros ERP dejan
     # filas en blanco entre metadatos y detalle. Contarlas contra el rango
@@ -579,7 +598,7 @@ def _pegar_fuente_completa(hoja, ruta, inicio: int, fin: int) -> None:
     fila = inicio
     for origen in filas_de_datos:
         hoja.row_dimensions[fila].hidden = False
-        _escribir_fila(hoja, fila, origen)
+        _escribir_fila(hoja, fila, origen, max_col=ancho)
         fila += 1
 
     _recortar(hoja, fila, fin)
@@ -622,11 +641,19 @@ def _detectar_encabezado(filas) -> int:
     return 0
 
 
-def _escribir_fila(hoja, fila: int, valores) -> None:
-    """Copia una fila del origen columna por columna, sin reordenar."""
+def _escribir_fila(hoja, fila: int, valores, max_col: int = 15) -> None:
+    """Copia una fila del origen columna por columna, sin reordenar.
+
+    `max_col` limita hasta que columna se escribe. Por defecto 15 (la plantilla
+    TERLICA llega hasta O), pero al pegar una fuente TAL CUAL con sus propios
+    encabezados (auxiliar/balance de otro ERP) se sube el limite: el auxiliar de
+    SAP B1 trae Debito/Credito/Saldo en las columnas 17-19 y cortarlas en 15
+    dejaba la hoja sin los movimientos, que es justo lo que hace falta para los
+    cruces.
+    """
     for desplazamiento, valor in enumerate(valores):
         columna = 1 + desplazamiento
-        if columna > 15:          # la hoja de la plantilla llega hasta O
+        if columna > max_col:
             break
         celda = hoja.cell(row=fila, column=columna)
         if _escribible(celda):
@@ -901,7 +928,10 @@ def _depositar_cedula_cuentas(hoja, ctx) -> None:
                      % (_REV_TABLA_MAX, len(cuentas), ", ".join(cuentas)))
         cuentas = cuentas[:_REV_TABLA_MAX]
 
-    # Tabla de cuentas: una fila por cuenta.
+    # Tabla de cuentas: una fila por cuenta. La columna Debito sale del balance
+    # (movimiento debito del periodo); vacia en SAP GRC. El Saldo es la formula
+    # viva Credito - Debito.
+    debitos = getattr(ctx, "debitos", None) or {}
     fila = _REV_TABLA_FILA_1
     for cuenta in cuentas:
         tarifa = tarifas_cuenta.get(cuenta)
@@ -909,6 +939,9 @@ def _depositar_cedula_cuentas(hoja, ctx) -> None:
         hoja.cell(row=fila, column=_REV_COL_DESC,
                   value=_texto_de_cuenta(tarifa) if tarifa is not None
                   else "Cuenta %s" % cuenta)
+        debito = debitos.get(cuenta)
+        if debito:
+            hoja.cell(row=fila, column=_REV_COL_DEBITO, value=int(debito))
         hoja.cell(row=fila, column=_REV_COL_CREDITO, value=int(ctx.saldos[cuenta]))
         hoja.cell(row=fila, column=_REV_COL_SALDO,
                   value="=ROUND(+N%d-M%d,-3)" % (fila, fila))

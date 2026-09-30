@@ -105,6 +105,23 @@ def _deteccion_dinamica(filas):
     return d if ("cuenta" in d.columnas and tiene_mov) else None
 
 
+def leer_debitos(ruta: Path, excluidas=(), municipio: str = None) -> dict:
+    """{cuenta: debito del periodo} por cuenta 2368, para la columna Debito de la
+    cedula. Vacio en el formato SAP GRC (la cedula de TERLICA no muestra debito);
+    solo aplica a los balances con debito/credito separados (SAP B1)."""
+    filas = leer_filas(ruta, hoja="BALANCE")
+    try:
+        localizar_columnas(filas, ROLES_BALANCE, FIRMA_BALANCE)
+        return {}
+    except ColumnaNoIdentificada:
+        d = _deteccion_dinamica(filas)
+        if d is None:
+            return {}
+        from motor_reteica.ingesta.adaptador import leer_movimientos
+        movs = leer_movimientos(filas, d, excluidas, municipio=municipio)
+        return {cuenta: deb for cuenta, (_n, deb, _c) in movs.items()}
+
+
 def leer_balance(ruta: Path, excluidas=(), municipio: str = None) -> dict:
     filas = leer_filas(ruta, hoja="BALANCE")
     try:

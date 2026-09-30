@@ -253,8 +253,9 @@ def _menciona_municipio(nombre_cuenta: str, municipio: str) -> bool:
     return any(p in nombre for p in palabras) if palabras else False
 
 
-def leer_saldos(filas, d: Deteccion, excluidas=(), municipio: str = None) -> dict:
-    """Movimiento del periodo por cuenta 2368, desde cualquier balance.
+def leer_movimientos(filas, d: Deteccion, excluidas=(),
+                     municipio: str = None) -> dict:
+    """{cuenta: (nombre, debito, credito)} por cada cuenta 2368 HOJA del balance.
 
     Maneja el balance COMPLETO de la empresa (miles de cuentas, con jerarquia y
     varios municipios), no solo un extracto de 2368:
@@ -274,39 +275,48 @@ def leer_saldos(filas, d: Deteccion, excluidas=(), municipio: str = None) -> dic
         return {}
     col_nombre = d.columnas.get("nombre_cuenta")
     col_nit = d.columnas.get("nit")
+    col_debito = d.columnas.get("debito")
     excluidas = set(excluidas)
 
-    # 1. Fila RESUMEN de cada cuenta 2368 (sin tercero): {cuenta: (nombre, valor)}
+    def valor_col(fila, col):
+        if col is None or col >= len(fila):
+            return Decimal("0")
+        v = _a_decimal(fila[col])
+        return v.copy_abs() if v is not None else Decimal("0")
+
     resumen = {}
     for fila in filas[d.fila_encabezado + 1:]:
         if col_cuenta >= len(fila) or not _es_codigo_cuenta(fila[col_cuenta]):
             continue
         # Fila de tercero (trae NIT/codigo SN): es el desglose, no el total.
-        if col_nit is not None and col_nit < len(fila) and \
-                _texto(fila[col_nit]):
+        if col_nit is not None and col_nit < len(fila) and _texto(fila[col_nit]):
             continue
         cuenta = _digitos(fila[col_cuenta])
         if cuenta in resumen:
             continue
-        valor = _retencion_de(fila, d)
+        credito = _retencion_de(fila, d)
+        credito = credito.copy_abs() if credito is not None else Decimal("0")
         nombre = (_texto(fila[col_nombre])
                   if col_nombre is not None and col_nombre < len(fila) else "")
-        resumen[cuenta] = (nombre, valor.copy_abs() if valor is not None
-                           else Decimal("0"))
+        resumen[cuenta] = (nombre, valor_col(fila, col_debito), credito)
 
     if not resumen:
         return {}
 
-    # 2. Solo HOJAS: una cuenta que no es prefijo de ninguna otra recogida.
     codigos = set(resumen)
     hojas = {c for c in codigos
              if not any(o != c and o.startswith(c) for o in codigos)}
 
-    # 3. Filtro por municipio, solo si el balance mezcla municipios.
     if municipio:
         del_municipio = {c for c in hojas
                          if _menciona_municipio(resumen[c][0], municipio)}
         if del_municipio and len(del_municipio) < len(hojas):
             hojas = del_municipio
 
-    return {c: resumen[c][1] for c in hojas if c not in excluidas}
+    return {c: resumen[c] for c in hojas if c not in excluidas}
+
+
+def leer_saldos(filas, d: Deteccion, excluidas=(), municipio: str = None) -> dict:
+    """Movimiento credito del periodo por cuenta 2368 HOJA (ver leer_movimientos)."""
+    movs = leer_movimientos(filas, d, excluidas, municipio)
+    return {cuenta: credito for cuenta, (_, _debito, credito) in movs.items()}
