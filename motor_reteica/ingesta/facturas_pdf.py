@@ -6,13 +6,76 @@ puede extraer la base con seguridad se marca REQUIERE_REVISION: el papel debe
 decir que no se pudo cotejar, no fingir que cuadro.
 """
 
+import os
 import re
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
+from functools import lru_cache
 from pathlib import Path
 
 import pdfplumber
+
+# Debajo de este umbral de texto extraible se asume que el PDF es una IMAGEN
+# escaneada (sin capa de texto) y se cae a OCR.
+_MIN_TEXTO_PDF = 30
+# Ruta del binario de Tesseract en Windows (en Linux va por PATH tras
+# 'apt install tesseract-ocr'). Solo se usa si existe.
+_TESSERACT_WIN = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+
+
+def _texto_de_pdf(ruta) -> str:
+    """Texto de las 2 primeras paginas del PDF, con OCR si es una imagen.
+
+    Primero intenta la extraccion normal (rapida, gratis). Si el PDF no trae
+    capa de texto -- factura escaneada -- cae a OCR (Tesseract). Asi el motor
+    lee tambien las facturas que son foto/scan, no solo las nativas de texto.
+    """
+    try:
+        with pdfplumber.open(ruta) as pdf:
+            texto = "\n".join((p.extract_text() or "") for p in pdf.pages[:2])
+    except Exception:
+        texto = ""
+    if len(texto.strip()) >= _MIN_TEXTO_PDF:
+        return texto
+    try:
+        return _ocr_pdf(str(ruta), os.path.getmtime(ruta))
+    except Exception:
+        return texto
+
+
+@lru_cache(maxsize=64)
+def _ocr_pdf(ruta: str, _mtime: float) -> str:
+    """OCR de las 2 primeras paginas. Cacheado para no repetir el trabajo caro
+    entre el clasificador y el lector. Devuelve '' si falta alguna pieza (OCR
+    no disponible) -- la factura queda REQUIERE_REVISION, nunca revienta."""
+    try:
+        import pymupdf
+        import pytesseract
+        from PIL import Image
+    except Exception:
+        return ""
+    if os.name == "nt" and os.path.exists(_TESSERACT_WIN):
+        pytesseract.pytesseract.tesseract_cmd = _TESSERACT_WIN
+    try:
+        idiomas = pytesseract.get_languages()
+        lang = "spa+eng" if "spa" in idiomas else "eng"
+    except Exception:
+        lang = "eng"
+    try:
+        doc = pymupdf.open(ruta)
+    except Exception:
+        return ""
+    partes = []
+    for page in list(doc)[:2]:
+        pix = page.get_pixmap(dpi=300)
+        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+        try:
+            partes.append(pytesseract.image_to_string(img, lang=lang))
+        except Exception:
+            return ""
+    doc.close()
+    return "\n".join(partes)
 
 ALTA = "ALTA"
 REQUIERE_REVISION = "REQUIERE_REVISION"
@@ -108,8 +171,7 @@ def _numero_de_documento(texto: str):
 
 
 def leer_factura(ruta: Path, nit_cliente: str = "819002433") -> FacturaFuente:
-    with pdfplumber.open(ruta) as pdf:
-        texto = pdf.pages[0].extract_text()
+    texto = _texto_de_pdf(ruta)
     lineas = [l.strip() for l in texto.split("\n")]
 
     nit = ""

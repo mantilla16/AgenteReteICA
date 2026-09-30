@@ -13,3 +13,9 @@ python-multipart==0.0.12
 # servidor y en el CI.
 psycopg[binary]>=3.2.10,<3.3
 psycopg_pool>=3.2.2,<4
+# OCR para facturas escaneadas (PDF que son imagen, sin capa de texto).
+# pymupdf renderiza la pagina a imagen; pytesseract corre Tesseract. El binario
+# de Tesseract NO viene por pip: en el servidor Linux hay que instalarlo una vez
+# con 'sudo apt install -y tesseract-ocr tesseract-ocr-spa'.
+pymupdf>=1.24,<2
+pytesseract>=0.3.10,<0.4

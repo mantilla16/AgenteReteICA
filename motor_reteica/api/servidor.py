@@ -404,12 +404,8 @@ def _es_borrador_pdf(ruta: Path) -> bool:
         return False
     if not ext.nit:
         return False
-    try:
-        import pdfplumber
-        with pdfplumber.open(ruta) as pdf:
-            texto = " ".join((p.extract_text() or "") for p in pdf.pages[:1])
-    except Exception:
-        return False
+    from ..ingesta.facturas_pdf import _texto_de_pdf
+    texto = _texto_de_pdf(ruta)      # con OCR si el PDF es imagen escaneada
     texto_norm = _sin_acentos(texto.upper())
     encabezado_norm = _sin_acentos(
         "\n".join(texto.splitlines()[:6]).upper())
@@ -429,12 +425,8 @@ _MARCAS_DE_FACTURA = ("FACTURA", "FACTURA ELECTRONICA", "FACTURA DE VENTA",
 
 
 def _es_factura_pdf(ruta: Path) -> bool:
-    try:
-        import pdfplumber
-        with pdfplumber.open(ruta) as pdf:
-            texto = " ".join((p.extract_text() or "") for p in pdf.pages[:2])
-    except Exception:
-        return False
+    from ..ingesta.facturas_pdf import _texto_de_pdf
+    texto = _texto_de_pdf(ruta)      # con OCR si el PDF es imagen escaneada
     sin_tildes = (texto.upper().replace("Ó", "O").replace("Í", "I")
                   .replace("É", "E").replace("Á", "A").replace("Ú", "U"))
     return any(marca in sin_tildes for marca in _MARCAS_DE_FACTURA)
