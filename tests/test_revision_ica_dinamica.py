@@ -27,9 +27,23 @@ def hoja():
     return libro["REVISION ICA"]
 
 
-def _ctx(saldos, tarifas):
+def _ctx(saldos, tarifas, debitos=None):
+    """saldos = credito por cuenta (balance, define que cuentas van). Los VALORES
+    de la cedula salen del auxiliar: se arma una LineaAuxiliar por cuenta con ese
+    credito (y debito opcional, p.ej. devoluciones)."""
+    from datetime import date
+    from motor_reteica.tipos import LineaAuxiliar
+    debitos = debitos or {}
+    lineas = [
+        LineaAuxiliar(
+            cuenta=c, nit="", tercero="", fecha_documento=date(1900, 1, 1),
+            fecha_contabilizacion=date(1900, 1, 1), referencia="", documento="",
+            concepto="", retencion=Decimal(str(v)),
+            debito=Decimal(str(debitos.get(c, 0))))
+        for c, v in saldos.items() if Decimal(str(v)) != 0]
     return SimpleNamespace(
         saldos={k: Decimal(str(v)) for k, v in saldos.items()},
+        lineas=lineas,
         municipio=SimpleNamespace(
             tarifa_por_cuenta={k: Decimal(str(v)) for k, v in tarifas.items()}))
 
@@ -83,6 +97,20 @@ def test_cuentas_en_cero_no_entran(hoja):
     assert hoja["K14"].value is None
     assert hoja["N12"].value == 36318
     assert hoja["N13"].value == 438243
+
+
+def test_devolucion_debito_resta_del_credito(hoja):
+    """Una devolucion de ICA va al debito del auxiliar y RESTA del credito: el
+    Saldo (neto) de la cedula es Credito - Debito."""
+    ctx = _ctx(
+        {"2368050301": 957200, "2368050302": 376162},
+        {"2368050301": "0.005", "2368050302": "0.010"},
+        debitos={"2368050302": 50000})     # devolucion de 50.000 en la 10x1000
+    _depositar_cedula_cuentas(hoja, ctx)
+    assert hoja["N12"].value == 957200 and hoja["M12"].value is None
+    assert hoja["N13"].value == 376162
+    assert hoja["M13"].value == 50000          # debito = devolucion
+    assert hoja["O13"].value == "=ROUND(+N13-M13,-3)"   # saldo neto
 
 
 def test_sin_balance_lo_dice(hoja):

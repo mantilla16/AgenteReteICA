@@ -214,6 +214,14 @@ def leer_lineas(filas, d: Deteccion) -> list:
         i = d.columnas.get(rol)
         return fila[i] if i is not None and i < len(fila) else None
 
+    col_debito = d.columnas.get("debito")
+
+    def debito_de(fila):
+        if col_debito is None or col_debito >= len(fila):
+            return Decimal("0")
+        v = _a_decimal(fila[col_debito])
+        return v.copy_abs() if v is not None else Decimal("0")
+
     lineas = []
     for fila, cuenta_efectiva in _transacciones(filas, d):
         retencion = _retencion_de(fila, d)
@@ -229,6 +237,7 @@ def leer_lineas(filas, d: Deteccion) -> list:
             documento=_texto(celda(fila, "documento")),
             concepto=_texto(celda(fila, "concepto")),
             retencion=retencion.copy_abs(),
+            debito=debito_de(fila),
         ))
     return lineas
 

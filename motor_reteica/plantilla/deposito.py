@@ -928,10 +928,18 @@ def _depositar_cedula_cuentas(hoja, ctx) -> None:
                      % (_REV_TABLA_MAX, len(cuentas), ", ".join(cuentas)))
         cuentas = cuentas[:_REV_TABLA_MAX]
 
-    # Tabla de cuentas: una fila por cuenta. La columna Debito sale del balance
-    # (movimiento debito del periodo); vacia en SAP GRC. El Saldo es la formula
-    # viva Credito - Debito.
-    debitos = getattr(ctx, "debitos", None) or {}
+    # Los VALORES de la cedula salen del AUXILIAR (los movimientos auditados), no
+    # del balance: el balance aporta las cuentas y la tarifa, pero lo que se pone
+    # aca es lo validado en el auxiliar. Por cuenta se suman el credito (retencion
+    # practicada) y el debito (devoluciones de ICA). El Saldo (=Credito-Debito) es
+    # la retencion NETA: una devolucion resta del credito.
+    from collections import defaultdict
+    cred_aux = defaultdict(lambda: Decimal("0"))
+    deb_aux = defaultdict(lambda: Decimal("0"))
+    for linea in ctx.lineas:
+        cred_aux[linea.cuenta] += linea.retencion
+        deb_aux[linea.cuenta] += getattr(linea, "debito", Decimal("0"))
+
     fila = _REV_TABLA_FILA_1
     for cuenta in cuentas:
         tarifa = tarifas_cuenta.get(cuenta)
@@ -939,10 +947,11 @@ def _depositar_cedula_cuentas(hoja, ctx) -> None:
         hoja.cell(row=fila, column=_REV_COL_DESC,
                   value=_texto_de_cuenta(tarifa) if tarifa is not None
                   else "Cuenta %s" % cuenta)
-        debito = debitos.get(cuenta)
+        debito = deb_aux.get(cuenta)
         if debito:
             hoja.cell(row=fila, column=_REV_COL_DEBITO, value=int(debito))
-        hoja.cell(row=fila, column=_REV_COL_CREDITO, value=int(ctx.saldos[cuenta]))
+        hoja.cell(row=fila, column=_REV_COL_CREDITO,
+                  value=int(cred_aux.get(cuenta, Decimal("0"))))
         hoja.cell(row=fila, column=_REV_COL_SALDO,
                   value="=ROUND(+N%d-M%d,-3)" % (fila, fila))
         fila += 1

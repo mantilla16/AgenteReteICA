@@ -54,6 +54,11 @@ class LineaAuxiliar:
     documento: str
     concepto: str
     retencion: Decimal
+    # Movimiento DEBITO de la linea (devolucion/reversion de ICA). Por defecto 0:
+    # en los auxiliares de una sola columna con signo (SAP GRC 'Importe en ML')
+    # no existe debito separado. En SAP B1 (debito/credito separados) una
+    # devolucion va al debito y RESTA del credito al calcular la retencion neta.
+    debito: Decimal = Decimal("0")
 
     def __post_init__(self):
         if not isinstance(self.retencion, Decimal):
