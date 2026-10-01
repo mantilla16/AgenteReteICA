@@ -65,10 +65,13 @@ def test_los_amarres_contables_cuadran(ctx):
 
 
 def test_la_revision_no_concluye_limpia(ctx):
-    """C7 sin Acuerdo municipal y C12 sin pago anterior lo impiden."""
+    """C7 sin Acuerdo municipal lo impide. C12 depende del pago anterior, que es
+    insumo OPCIONAL (solo son obligatorios balance, borrador, auxiliar y
+    facturas): sin el, C12 es NO APLICA y NO cuenta contra la conclusion."""
     assert ctx.informe.puede_concluir_limpio is False
     assert "C7" in ctx.informe.controles_no_ejecutados
-    assert "C12" in ctx.informe.controles_no_ejecutados
+    assert "C12" in ctx.informe.controles_no_aplicables
+    assert "C12" not in ctx.informe.controles_no_ejecutados
 
 
 def test_no_hay_hallazgos_con_impacto_en_pesos(ctx):

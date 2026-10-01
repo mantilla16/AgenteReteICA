@@ -446,6 +446,23 @@ def revisar(carpeta, nit, periodo, municipio,
                 controles.c15_formato_historico, borrador, historico, periodo),
     ]
 
+    # Insumos OBLIGATORIOS de la revision: balance, borrador, auxiliar y
+    # facturas de muestra. El resto (reporte del ERP, formato historico) es
+    # OPCIONAL: los controles que dependen solo de esos insumos, cuando no se
+    # aportan, son NO APLICA -- no NO_EJECUTADO -- para que su ausencia NO vuelva
+    # la conclusion 'no concluyente'. Antes, no aportar el ERP (que no es
+    # obligatorio) ensuciaba el papel con C3/C4/C5 'no respaldan conclusion'.
+    import dataclasses
+    from motor_reteica.tipos import Estado
+    _DEPENDE_DE = {"C3": "erp", "C4": "erp", "C5": "erp",
+                   "C12": "formato_historico", "C15": "formato_historico"}
+    resultados = [
+        dataclasses.replace(r, aplica=False)
+        if (r.codigo in _DEPENDE_DE and _DEPENDE_DE[r.codigo] not in presentes
+            and r.estado is Estado.NO_EJECUTADO)
+        else r
+        for r in resultados]
+
     # D7: la IA tiene CARRIL PROPIO. No modifica C0..C15; sus salidas entran
     # como controles con los mismos estados, de modo que un hallazgo suyo
     # bloquee la conclusion limpia igual que uno de C9. Si el modelo no se
