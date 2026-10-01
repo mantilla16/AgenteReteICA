@@ -32,6 +32,7 @@ import openpyxl
 from openpyxl.cell.cell import MergedCell
 
 from motor_reteica.plantilla.fidelidad import guardar_conservando_formato
+from motor_reteica.plantilla.imagen_borrador import insertar_borrador
 from motor_reteica.tipos import Estado
 
 PLANTILLA = Path(__file__).parent / "PT_ReteICA_plantilla.xlsx"
@@ -666,30 +667,45 @@ def _recortar(hoja, desde: int, hasta: int) -> None:
         hoja.delete_rows(desde, hasta - desde + 1)
 
 
+# El motor PREPARA el papel, asi que firma como ELABORADO POR. NUNCA llena
+# REVISADO POR: escribir ahi un nombre seria fabricar evidencia de una revision
+# que no ha ocurrido. Las cabeceras de la plantilla traen horneado a Carolina y
+# a Robinson (TERLICA); para otro cliente ese nombre es mentira.
+def _elaborado_por(ctx) -> str:
+    declarante = getattr(ctx.manifiesto, "declarado_por", "") if ctx.manifiesto else ""
+    return declarante or "Motor de Revision de ReteICA"
+
+
+def _mes_nombre(ctx) -> str:
+    return _MESES[int(ctx.periodo.split("-")[1]) - 1]
+
+
+def _fecha_maxima(ctx):
+    """La fecha maxima de presentacion/pago.
+
+    Sale del PROPIO borrador (la trae impresa). Solo si el PDF no la trajo se
+    cae al calendario del municipio, y si ese tampoco la tiene, queda vacia --
+    nunca se inventa.
+    """
+    fecha = getattr(ctx.borrador, "fecha_maxima", None)
+    if fecha is None:
+        try:
+            fecha = ctx.municipio.vencimiento(ctx.periodo)
+        except KeyError:
+            fecha = None
+    return fecha
+
+
 def _depositar_check_list(libro, ctx) -> None:
     hoja = libro["Check List"]
-    anio, mes = (int(p) for p in ctx.periodo.split("-"))
 
     hoja["D2"] = ctx.borrador.razon_social
     hoja["D3"] = _nit_con_dv(ctx.nit)
     hoja["D6"] = "Revisión Reteica"
-    hoja["D7"] = _MESES[mes - 1]
-    # La fecha maxima sale del PROPIO borrador (la trae impresa). Solo si el PDF
-    # no la trajo se cae al calendario del municipio, y si ese tampoco la tiene,
-    # queda vacia -- nunca se inventa.
-    fecha_maxima = getattr(ctx.borrador, "fecha_maxima", None)
-    if fecha_maxima is None:
-        try:
-            fecha_maxima = ctx.municipio.vencimiento(ctx.periodo)
-        except KeyError:
-            fecha_maxima = None
-    hoja["D5"] = fecha_maxima
+    hoja["D7"] = _mes_nombre(ctx)
+    hoja["D5"] = _fecha_maxima(ctx)
 
-    # El motor prepara el papel, asi que firma como ELABORADO POR. NUNCA
-    # llena REVISADO POR: escribir ahi un nombre seria fabricar evidencia de
-    # una revision que no ha ocurrido.
-    declarante = getattr(ctx.manifiesto, "declarado_por", "") if ctx.manifiesto else ""
-    hoja["D10"] = declarante or "Motor de Revision de ReteICA"
+    hoja["D10"] = _elaborado_por(ctx)
     hoja["G10"] = date.today()
     hoja["D11"] = None
     hoja["G11"] = None
@@ -732,6 +748,20 @@ def _depositar_facturas(libro, ctx) -> None:
     contabilizado. La FECHA que se muestra es la del documento, no la del
     auxiliar: es lo que hace visible el desfase de FE10."""
     hoja = libro[_FACTURAS[0]]
+
+    # Cuadro de encabezado (B2:G12). La plantilla lo trae horneado con TERLICA,
+    # Carolina y Robinson; se ajusta al cliente y auditor de esta corrida. Las
+    # etiquetas fijas del papel (TIPO DE TRABAJO, NOMBRE DEL PT, NORMATIVIDAD,
+    # CIFRAS, version) no se tocan. REVISADO POR se limpia -- el motor no firma.
+    hoja["C2"] = ctx.borrador.razon_social
+    hoja["C3"] = _nit_con_dv(ctx.nit)
+    hoja["C5"] = _fecha_maxima(ctx)
+    hoja["C7"] = _mes_nombre(ctx)
+    hoja["C10"] = _elaborado_por(ctx)
+    hoja["F10"] = date.today()
+    hoja["C11"] = None
+    hoja["F11"] = None
+
     inicio, fin = _FACTURAS[1], _FACTURAS[2]
     _limpiar(hoja, inicio, fin, range(2, 12))
 
@@ -1029,6 +1059,18 @@ def _depositar_revision_ica(libro, ctx) -> None:
     """
     hoja = libro["REVISION ICA"]
 
+    # Cuadro informativo (B1:F6). La plantilla lo trae horneado con TERLICA,
+    # Carolina y Robinson; se ajusta al cliente y auditor de esta corrida.
+    # D2 ("Revisión Industria y Comercio") es el nombre fijo del papel: no se
+    # toca. REVISADO POR se limpia -- el motor no firma una revision ajena.
+    hoja["D1"] = ctx.borrador.razon_social
+    hoja["D3"] = _elaborado_por(ctx)
+    hoja["F3"] = date.today()
+    hoja["D4"] = None
+    hoja["F4"] = None
+    hoja["D5"] = _mes_nombre(ctx)
+    hoja["D6"] = ctx.municipio.nombre
+
     _depositar_cedula_cuentas(hoja, ctx)
 
     # Lo declarado: se suman TODAS las actividades del borrador, no la celda
@@ -1126,7 +1168,15 @@ def depositar(ctx, destino, plantilla: Path = None,
     _depositar_cruce_universal(libro, ctx, total_declarado_confirmado)
     _depositar_conclusiones(libro, ctx)
 
-    return guardar_conservando_formato(libro, plantilla, Path(destino))
+    salida = guardar_conservando_formato(libro, plantilla, Path(destino))
+
+    # La cara del borrador que de verdad se subio reemplaza a la imagen de
+    # TERLICA que la plantilla trae horneada en DECLARACION. Va DESPUES del
+    # guardado fiel: ese paso reconstruye el paquete desde la plantilla y
+    # descartaria una imagen agregada por openpyxl, asi que la cirugia se hace
+    # sobre el archivo ya producido. Si falla, deja la imagen de la plantilla.
+    insertar_borrador(salida, (ctx.rutas or {}).get("borrador"))
+    return salida
 
 
 def _depositar_cruce_universal(libro, ctx, total_confirmado) -> None:

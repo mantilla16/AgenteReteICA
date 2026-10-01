@@ -9,6 +9,7 @@ seria fabricar evidencia de una revision que no ocurrio.
 """
 
 import warnings
+import zipfile
 from datetime import date
 from pathlib import Path
 
@@ -17,7 +18,7 @@ import pytest
 
 from motor_reteica.parametros.municipios.santa_marta import MUNICIPIO
 from motor_reteica.pipeline import revisar
-from motor_reteica.plantilla.deposito import depositar
+from motor_reteica.plantilla.deposito import PLANTILLA, depositar
 
 BASE = Path(__file__).parent / "fixtures" / "terlica_202607"
 
@@ -28,13 +29,18 @@ def _solo_fecha(valor):
 
 
 @pytest.fixture(scope="module")
-def papel(tmp_path_factory):
+def papel_ruta(tmp_path_factory):
     ctx = revisar(BASE, nit="819002433", periodo="2026-07", municipio=MUNICIPIO)
     salida = tmp_path_factory.mktemp("p") / "papel.xlsx"
     depositar(ctx, salida)
+    return salida
+
+
+@pytest.fixture(scope="module")
+def papel(papel_ruta):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        return openpyxl.load_workbook(salida)
+        return openpyxl.load_workbook(papel_ruta)
 
 
 # --------------------------------------------------------------------------
@@ -152,3 +158,59 @@ def test_la_fecha_de_la_factura_es_la_del_pdf_no_la_del_auxiliar(papel):
             assert leida == date(2026, 6, 26)
             return
     pytest.fail("no se deposito FE10")
+
+
+# --------------------------------------------------------------------------
+# Cuadros informativos: se ajustan al cliente/auditor, no quedan los de TERLICA
+# --------------------------------------------------------------------------
+
+def test_la_cabecera_de_revision_ica_se_ajusta_al_cliente(papel):
+    hoja = papel["REVISION ICA"]
+    assert "GRANELES" in str(hoja["D1"].value).upper()      # Entidad
+    assert str(hoja["D5"].value).strip().lower() == "julio"  # Periodo
+    assert str(hoja["D6"].value).strip() == "Santa Marta"    # Municipio
+
+
+def test_revision_ica_firma_elaborado_pero_no_revisado(papel):
+    """La plantilla trae a Robinson horneado como REVISADO POR; el motor no
+    puede dejar su nombre -- esa revision no ha ocurrido."""
+    hoja = papel["REVISION ICA"]
+    assert hoja["D3"].value, "ELABORADO POR deberia quedar diligenciado"
+    assert not hoja["D4"].value, "REVISADO POR debe quedar VACIO"
+
+
+def test_la_cabecera_de_facturas_se_ajusta_al_cliente(papel):
+    hoja = papel["Validación de facturas"]
+    assert "GRANELES" in str(hoja["C2"].value).upper()       # cliente
+    assert "819002433" in str(hoja["C3"].value)              # NIT
+    assert str(hoja["C7"].value).strip().lower() == "julio"  # periodo
+    assert hoja["C10"].value, "ELABORADO POR diligenciado"
+    assert not hoja["C11"].value, "REVISADO POR vacio: nadie reviso"
+
+
+# --------------------------------------------------------------------------
+# DECLARACION: la cara del borrador que se subio, no la de TERLICA
+# --------------------------------------------------------------------------
+
+def test_la_imagen_de_declaracion_es_el_borrador_subido(papel_ruta):
+    """La plantilla trae horneada la cara de TERLICA; para el borrador real se
+    reemplazan los bytes de la imagen que el dibujo de DECLARACION referencia."""
+    from motor_reteica.plantilla.imagen_borrador import _ubicar_dibujo
+    _, media, _, _ = _ubicar_dibujo(papel_ruta, "DECLARACION")
+    assert media, "no se ubico la imagen de DECLARACION"
+    original = zipfile.ZipFile(PLANTILLA).read(media)
+    generado = zipfile.ZipFile(papel_ruta).read(media)
+    assert generado != original, "la imagen sigue siendo la de la plantilla"
+    assert len(generado) > 0
+
+
+def test_el_dibujo_de_declaracion_queda_anclado_a_una_celda(papel_ruta):
+    """oneCellAnchor: el alto se ajusta al borrador sin deformarlo."""
+    draw, _, _, _ = _ubicar_dibujo_mod(papel_ruta)
+    xml = zipfile.ZipFile(papel_ruta).read(draw).decode("utf-8")
+    assert "oneCellAnchor" in xml
+
+
+def _ubicar_dibujo_mod(ruta):
+    from motor_reteica.plantilla.imagen_borrador import _ubicar_dibujo
+    return _ubicar_dibujo(ruta, "DECLARACION")
