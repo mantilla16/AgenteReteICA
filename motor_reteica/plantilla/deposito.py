@@ -1166,9 +1166,14 @@ def _depositar_cruce_universal(libro, ctx, total_confirmado) -> None:
 
     hoja.cell(row=fila + 3, column=2, value="Diferencia")
     hoja.cell(row=fila + 3, column=4, value=int(diferencia))
-    # El estado se DICE, no se usa un semaforo: los redondeos a miles del
-    # formulario producen diferencias legitimas de hasta unos cientos.
-    if abs(diferencia) <= 1000:
+    # El estado se DICE, no se usa un semaforo. La tolerancia escala con el
+    # numero de cuentas 2368: el formulario redondea CADA renglon a miles, asi
+    # que con N cuentas la diferencia por puro redondeo puede llegar a ~1000*N.
+    # Antes era un tope fijo de 1000 y gritaba 'NO CUADRA' con 3 cuentas por una
+    # diferencia de redondeo de 1.113.
+    n_cuentas = len({l.cuenta for l in ctx.lineas}) or 1
+    tolerancia = Decimal(1000) * n_cuentas
+    if abs(diferencia) <= tolerancia:
         veredicto = "CUADRA (diferencia dentro del redondeo del formulario)"
     else:
         veredicto = "NO CUADRA -- revisar por que"

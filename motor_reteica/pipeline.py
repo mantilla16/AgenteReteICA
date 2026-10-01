@@ -475,7 +475,10 @@ def revisar(carpeta, nit, periodo, municipio,
         huellas={clave: huella(rutas[clave]) for clave in sorted(presentes)
                  if clave in rutas},
         insumos_obtenidos=presentes,
-        total_auxiliar=sum((l.retencion for l in lineas), Decimal("0")),
+        # NETO: credito menos debito. Una devolucion de ICA (debito) resta de lo
+        # retenido, igual que en la cedula; el declarado tambien es neto, asi el
+        # cruce compara neto contra neto (antes daba 'NO CUADRA' por la devolucion).
+        total_auxiliar=sum((l.retencion - l.debito for l in lineas), Decimal("0")),
         total_erp=sum((f.retencion for f in (filas_erp or [])), Decimal("0")),
         manifiesto=manifiesto,
         atestacion=atestacion,
