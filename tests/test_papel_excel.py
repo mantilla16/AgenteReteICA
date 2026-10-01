@@ -71,6 +71,8 @@ def test_la_conclusion_no_afirma_ausencia_de_diferencias(libro):
 def test_los_controles_traen_los_quince_codigos(libro):
     texto = _texto(libro["Controles"])
     for numero in range(0, 15):
+        if numero in (6, 9):        # C6 y C9 se retiraron del motor
+            continue
         assert "C%d" % numero in texto
 
 

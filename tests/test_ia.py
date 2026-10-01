@@ -227,11 +227,13 @@ def test_el_pipeline_sin_cliente_no_agrega_controles_de_ia():
     assert not [r for r in ctx.resultados if r.codigo.startswith("IA-")]
 
 
-def test_el_pipeline_con_cliente_agrega_los_dos_carriles():
+def test_el_pipeline_no_corre_la_ia_retirada():
+    """Los controles de IA (IA-1, IA-3) se retiraron del motor por decision del
+    auditor: generaban ruido. El pipeline ya no los agrega aunque haya cliente."""
     ctx = revisar(BASE, nit="819002433", periodo="2026-07",
                   municipio=MUNICIPIO, cliente_ia=ClienteFalso())
     codigos = [r.codigo for r in ctx.resultados]
-    assert "IA-1" in codigos and "IA-3" in codigos
+    assert "IA-1" not in codigos and "IA-3" not in codigos
 
 
 def test_la_ia_no_cambia_las_anclas():

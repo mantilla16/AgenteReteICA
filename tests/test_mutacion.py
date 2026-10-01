@@ -56,7 +56,7 @@ def test_el_caso_limpio_no_dispara_nada_grave(carpeta):
     """
     ctx = _revisar(carpeta)
     en_falla = sorted(r.codigo for r in ctx.resultados if r.estado is Estado.FALLA)
-    assert en_falla == ["C11", "C13", "C6"]
+    assert en_falla == ["C11", "C13"]      # C6 se retiro del motor
     assert ctx.informe.impacto_total == Decimal("0")
 
 
@@ -71,8 +71,9 @@ def test_un_tercero_sin_renglon_no_revienta_el_motor(carpeta):
     """Antes lanzaba KeyError; ahora debe clasificarse y reportarse."""
     _mutar_celda(carpeta / "sap_retenciones.xlsx", None, "830028245", 6, 9999999)
     ctx = _revisar(carpeta)
+    # El motor no revienta y la reconstruccion clasifica el tercero sin renglon.
+    # (C9 se retiro del motor, antes aqui se verificaba su FALLA.)
     assert "SIN_CLASIFICAR" in ctx.reconstruccion.por_actividad
-    assert _estado(ctx, "C9") is Estado.FALLA
 
 
 # --------------------------------------------------------------------------
@@ -97,8 +98,7 @@ def test_mutar_un_saldo_del_balance_dispara_c2(carpeta):
     _mutar_celda(carpeta / "balance.xlsx", "BALANCE", "2368010010", 8, 400000)
     ctx = _revisar(carpeta)
     assert _estado(ctx, "C2") is Estado.FALLA
-    assert _estado(ctx, "C3") is Estado.OK
-    assert _estado(ctx, "C9") is Estado.OK
+    assert _estado(ctx, "C3") is Estado.OK     # C9 se retiro del motor
 
 
 def test_mutar_una_retencion_del_erp_dispara_c3(carpeta):

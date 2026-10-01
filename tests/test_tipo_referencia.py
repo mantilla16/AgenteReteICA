@@ -27,12 +27,6 @@ def _excepciones(ctx, control):
     return [e for e in ctx.informe.excepciones_ordenadas if e.control == control]
 
 
-def test_c6_etiqueta_sus_excepciones_como_renglon(ctx):
-    excs = _excepciones(ctx, "C6")
-    assert excs, "julio 2026 siempre trae excepciones de C6"
-    assert all(e.tipo_referencia == REF_RENGLON for e in excs)
-
-
 def test_c11_etiqueta_sus_excepciones_de_cuenta_como_cuenta(ctx):
     """C11 trae excepciones sin renglon (NIT no legible) y con cuenta
     (fecha, base): solo estas ultimas deben llevar el tipo."""

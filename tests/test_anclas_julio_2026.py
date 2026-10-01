@@ -55,10 +55,6 @@ def test_ancla_impuesto_declarable(ctx):
     assert ctx.reconstruccion.total_impuesto_declarable == Decimal("474000")
 
 
-def test_c9_terminal_sin_diferencias(ctx):
-    assert _estado(ctx, "C9") is Estado.OK
-
-
 def test_los_amarres_contables_cuadran(ctx):
     for codigo in ("C0", "C1", "C2", "C3", "C4", "C5", "C8", "C10"):
         assert _estado(ctx, codigo) is Estado.OK, codigo

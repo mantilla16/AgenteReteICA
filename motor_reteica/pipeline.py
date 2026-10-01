@@ -463,18 +463,14 @@ def revisar(carpeta, nit, periodo, municipio,
         else r
         for r in resultados]
 
-    # D7: la IA tiene CARRIL PROPIO. No modifica C0..C15; sus salidas entran
-    # como controles con los mismos estados, de modo que un hallazgo suyo
-    # bloquee la conclusion limpia igual que uno de C9. Si el modelo no se
-    # puede llamar, salen NO_EJECUTADO -- nunca OK.
-    if cliente_ia is not None:
-        resultados.append(
-            controles_ia.ia1_plausibilidad(recon, borrador, municipio,
-                                           cliente=cliente_ia))
-        informe_previo = consolidar(resultados)
-        resultados.append(
-            controles_ia.ia3_consistencia(resultados, informe_previo,
-                                          cliente=cliente_ia))
+    # Controles RETIRADOS de la revision (decision del auditor): C6
+    # (clasificacion por linea) y C9 (reconstruccion vs borrador) asumen la
+    # estructura de renglones/conceptos de TERLICA y generan ruido en clientes
+    # con otro ERP; la IA (IA-1 plausibilidad, IA-3 consistencia) tambien. No se
+    # ejecutan ni aparecen en el papel. Las funciones siguen en el codigo por si
+    # se quieren reactivar.
+    _CONTROLES_RETIRADOS = {"C6", "C9"}
+    resultados = [r for r in resultados if r.codigo not in _CONTROLES_RETIRADOS]
 
     return ContextoRevision(
         nit=nit,
